@@ -852,7 +852,7 @@ var node_live: [8]bool = .{ false, false, false, false, false, false, false, fal
 
 fn findDaemon(dir: []const u8, out: []u8) ?[]u8 {
     const names = [_][]const u8{ "bitcoind.exe", "litecoind.exe", "dogecoind.exe", "bitcoind", "litecoind", "dogecoind" };
-    const roots = [_][]const u8{ "src/", "build/src/", "build/bin/", "" };
+    const roots = [_][]const u8{ "bin/", "src/", "build/src/", "build/bin/", "" };
     for (roots) |root| {
         for (names) |name| {
             var path: [300]u8 = undefined;
@@ -874,18 +874,27 @@ fn rpcPort(name: []const u8, index: usize) u16 {
     return @intCast(18440 + index);
 }
 
+pub fn launchBinary(port: u16, algo: []const u8, name: []const u8, bin: []const u8) void {
+    spawnNode(port, algo, name, bin);
+}
+
 pub fn launchBuilt(port: u16, algo: []const u8, name: []const u8, dir: []const u8) void {
-    const s = forPort(port);
-    s.algo_len = put(&s.algo, algo);
-    s.name_len = put(&s.name, name);
     var binbuf: [260]u8 = undefined;
     const bin = findDaemon(dir, &binbuf) orelse {
         setStage("failed", "the build finished but no node binary was found");
+        const s = forPort(port);
         s.lock.lock();
         note(s, "no node binary");
         s.lock.unlock();
         return;
     };
+    spawnNode(port, algo, name, bin);
+}
+
+fn spawnNode(port: u16, algo: []const u8, name: []const u8, bin: []const u8) void {
+    const s = forPort(port);
+    s.algo_len = put(&s.algo, algo);
+    s.name_len = put(&s.name, name);
     var index: usize = 0;
     for (&slots, 0..) |*slot, i| {
         if (slot == s) index = i;
@@ -904,10 +913,15 @@ pub fn launchBuilt(port: u16, algo: []const u8, name: []const u8, dir: []const u
     var conf_path: [240]u8 = undefined;
     const conf = std.fmt.bufPrint(&conf_path, "{s}/coin.conf", .{data_s}) catch return;
     var cf = compat.fs.cwd().createFile(conf, .{}) catch return;
-    cf.print("server=1\nrpcuser=thimble\nrpcpassword={s}\nrpcport={d}\nrpcbind=127.0.0.1\nrpcallowip=127.0.0.1\nprune=550\nlisten=1\n", .{ pass[0..16], rpc }) catch {};
+    cf.print("server=1\nrpcuser=thimble\nrpcpassword={s}\nrpcport={d}\nrpcbind=127.0.0.1\nrpcallowip=127.0.0.1\n", .{ pass[0..16], rpc }) catch {};
+    if (!std.mem.eql(u8, name, "Dogecoin")) cf.print("prune=550\n", .{}) catch {};
+    cf.print("listen=1\n", .{}) catch {};
     cf.close();
     var url: [160]u8 = undefined;
     const url_s = std.fmt.bufPrint(&url, "http://thimble:{s}@127.0.0.1:{d}", .{ pass[0..16], rpc }) catch return;
+    var url_keep: [160]u8 = undefined;
+    const url_n = @min(url_s.len, url_keep.len);
+    @memcpy(url_keep[0..url_n], url_s[0..url_n]);
     node_len[index][0] = put(&node_arg[index][0], bin);
     var arg1: [240]u8 = undefined;
     const a1 = std.fmt.bufPrint(&arg1, "-datadir={s}", .{data_s}) catch return;
@@ -927,12 +941,36 @@ pub fn launchBuilt(port: u16, algo: []const u8, name: []const u8, dir: []const u
         return;
     };
     node_live[index] = true;
-    setFeed(port, algo, url_s);
+    setFeed(port, algo, url_keep[0..url_n]);
     s.wallet_len = walletFrom(port, &s.wallet);
-    setStage("syncing", "node started. port stays closed until it can serve a template");
+    setStage("syncing", "node started. the pool port opens when a template exists");
     s.lock.lock();
     note(s, "node started, waiting for the chain");
     s.lock.unlock();
+    ensureWallet(s, url_keep[0..url_n]);
+}
+
+fn ensureWallet(s: *Source, url: []const u8) void {
+    var script: [80]u8 = undefined;
+    if (s.wallet_len > 0 and work.outputScript(s.wallet[0..s.wallet_len], &script) != null) return;
+    const alloc = std.heap.page_allocator;
+    var tries: usize = 0;
+    while (tries < 40) : (tries += 1) {
+        compat.time.sleep(3 * std.time.ns_per_s);
+        const ping = httpPost(alloc, url, "{\"jsonrpc\":\"1.0\",\"id\":\"w\",\"method\":\"getblockchaininfo\",\"params\":[]}") orelse continue;
+        alloc.free(ping);
+        if (httpPost(alloc, url, "{\"jsonrpc\":\"1.0\",\"id\":\"c\",\"method\":\"createwallet\",\"params\":[\"thimble\"]}")) |made| alloc.free(made);
+        const raw = httpPost(alloc, url, "{\"jsonrpc\":\"1.0\",\"id\":\"a\",\"method\":\"getnewaddress\",\"params\":[\"pool\",\"bech32\"]}") orelse continue;
+        defer alloc.free(raw);
+        var addr: [90]u8 = undefined;
+        const n = copyField(bodyOf(raw), "result", &addr);
+        if (n < 14) continue;
+        if (work.outputScript(addr[0..n], &script) == null) continue;
+        s.wallet_len = put(&s.wallet, addr[0..n]);
+        setStage("syncing", "payout address is set. the pool port opens when a template exists");
+        return;
+    }
+    setStage("syncing", "node is up. it has not given a payout address yet");
 }
 
 fn walletFrom(port: u16, dst: []u8) usize {

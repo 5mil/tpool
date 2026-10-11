@@ -111,7 +111,8 @@ var tunnel_box: HWND = undefined;
 var tunnel_line: HWND = undefined;
 var tunnel_child: compat.Child = .{ .argv = &.{} };
 var tunnel_live = false;
-var tunnel_argv = [_][]const u8{ "tools\\cloudflared.exe", "tunnel", "--url", "http://127.0.0.1:8080", "--no-autoupdate", "--logfile", "tools/tunnel.log" };
+var tunnel_shell: [420]u8 = @splat(0);
+var tunnel_cmd = [_][]const u8{ "cmd.exe", "/c", "" };
 var mine_box: HWND = undefined;
 var mine_line: HWND = undefined;
 var mine_child: compat.Child = .{ .argv = &.{} };
@@ -432,9 +433,46 @@ fn canReach(host: []const u8) bool {
     return term == .Exited and term.Exited == 0;
 }
 
+const Official = struct { url: []const u8, zip: []const u8, into: []const u8, bin: []const u8, why: []const u8 };
+
+fn official(name: []const u8) ?Official {
+    if (std.mem.eql(u8, name, "Bitcoin")) return .{
+        .url = "https://bitcoincore.org/bin/bitcoin-core-31.1/bitcoin-31.1-win64.zip",
+        .zip = "tools/bitcoin.zip",
+        .into = "coin-bin/Bitcoin",
+        .bin = "coin-bin/Bitcoin/bitcoin-31.1/bin/bitcoind.exe",
+        .why = "Bitcoin Core is not a bare make. Downloading the official node.",
+    };
+    if (std.mem.eql(u8, name, "Litecoin")) return .{
+        .url = "https://download.litecoin.org/litecoin-0.21.5.8/win/litecoin-0.21.5.8-win64.zip",
+        .zip = "tools/litecoin.zip",
+        .into = "coin-bin/Litecoin",
+        .bin = "coin-bin/Litecoin/litecoin-0.21.5.8/bin/litecoind.exe",
+        .why = "Litecoin is autotools. A bare make fails at once. Downloading the official node.",
+    };
+    if (std.mem.eql(u8, name, "Dogecoin")) return .{
+        .url = "https://github.com/dogecoin/dogecoin/releases/download/v1.14.9/dogecoin-1.14.9-win64.zip",
+        .zip = "tools/dogecoin.zip",
+        .into = "coin-bin/Dogecoin",
+        .bin = "coin-bin/Dogecoin/dogecoin-1.14.9/bin/dogecoind.exe",
+        .why = "Dogecoin Core is not a bare make. Downloading the official node.",
+    };
+    return null;
+}
+
 fn fetchWorker(repo: [180]u8, len: usize, port: u16, algo: [16]u8, algo_len: usize, name: [32]u8, name_len: usize) void {
     const typed = repo[0..len];
     const chain = @import("chain.zig");
+    if (official(name[0..name_len])) |rel| {
+        chain.setStage("downloading", rel.why);
+        if (!grab(rel.url, rel.zip, rel.into) or !toolAt(rel.bin)) {
+            chain.setStage("failed", "could not download the official node. See tools/ and the network.");
+            return;
+        }
+        chain.setStage("connecting", "official node is on disk. starting it");
+        chain.launchBinary(port, algo[0..algo_len], name[0..name_len], rel.bin);
+        return;
+    }
     chain.setStage("checking", "looking for git");
     const git = ensureGit();
     if (git.len == 0) {
@@ -489,24 +527,41 @@ fn fetchWorker(repo: [180]u8, len: usize, port: u16, algo: [16]u8, algo_len: usi
     }
     chain.setStage("compiling", "gcc, make, and cmake are ready. This can take a while.");
     var script = compat.fs.cwd().createFile("tools/build-coin.cmd", .{}) catch return;
-    script.print("@echo off\r\nset PATH=%~dp0mingw64\\bin;%PATH%\r\ncd /d \"{s}\"\r\nmingw32-make -j2\r\nif errorlevel 1 cmake -S . -B build\r\nif errorlevel 1 goto done\r\nif exist build cmake --build build -j 2\r\n:done\r\n", .{dest}) catch {};
+    script.print("@echo off\r\nset PATH=%~dp0mingw64\\bin;%PATH%\r\ncd /d \"{s}\"\r\nif exist Makefile (\r\n  mingw32-make -j2\r\n  exit /b %errorlevel%\r\n)\r\nif exist CMakeLists.txt (\r\n  cmake -S . -B build\r\n  if errorlevel 1 exit /b 1\r\n  cmake --build build -j 2\r\n  exit /b %errorlevel%\r\n)\r\necho no Makefile and no CMakeLists.txt. a bare make cannot build this repo.\r\nexit /b 2\r\n", .{dest}) catch {};
     script.close();
-    var log = compat.fs.cwd().createFile("build.log", .{}) catch return;
+    {
+        var log = compat.fs.cwd().createFile("build.log", .{}) catch return;
+        log.close();
+    }
     var build = compat.Child.init(&.{ "cmd.exe", "/c", "tools\\build-coin.cmd > build.log 2>&1" }, std.heap.page_allocator);
     build.stdout_behavior = .Ignore;
     build.stderr_behavior = .Ignore;
     const built = build.spawnAndWait() catch {
-        chain.setStage("compiling", "build tool not found, skipping to connect");
-        log.close();
-        return connectAfter(port, algo[0..algo_len], name[0..name_len], dest);
+        chain.setStage("failed", "the build tool would not start. see build.log");
+        return;
     };
-    log.close();
     if (built == .Exited and built.Exited == 0) {
         @import("chain.zig").setStage("compiled", "looking for the node");
-    } else {
-        @import("chain.zig").setStage("compiled", "build finished with errors, looking for a node anyway");
+        connectAfter(port, algo[0..algo_len], name[0..name_len], dest);
+        return;
     }
-    connectAfter(port, algo[0..algo_len], name[0..name_len], dest);
+    var why: [140]u8 = undefined;
+    const detail = logTail("build.log", &why);
+    @import("chain.zig").setStage("failed", if (detail.len > 0) detail else "build failed. see build.log");
+}
+
+fn logTail(path: []const u8, out: []u8) []const u8 {
+    const raw = compat.fs.cwd().readFileAlloc(std.heap.page_allocator, path, 1 << 16) catch return "";
+    defer std.heap.page_allocator.free(raw);
+    var end = raw.len;
+    while (end > 0 and (raw[end - 1] == '\n' or raw[end - 1] == '\r' or raw[end - 1] == ' ')) end -= 1;
+    if (end == 0) return "";
+    var start = end;
+    while (start > 0 and raw[start - 1] != '\n' and raw[start - 1] != '\r') start -= 1;
+    const line = raw[start..end];
+    const n = @min(line.len, out.len);
+    @memcpy(out[0..n], line[0..n]);
+    return out[0..n];
 }
 
 fn connectAfter(port: u16, algo: []const u8, name: []const u8, dest: []const u8) void {
@@ -557,23 +612,29 @@ fn tunnelWorker() void {
         setText(tunnel_line, "A tunnel is already open. Close it first.");
         return;
     }
+    compat.fs.cwd().makePath("tools") catch {};
     if (!ensureCloudflared()) {
-        setText(tunnel_line, "Could not download cloudflared. Check the network.");
-        return;
+        setText(tunnel_line, "Could not download cloudflared. Opening the mining port anyway.");
+    } else {
+        {
+            var blank = compat.fs.cwd().createFile("tools/tunnel.log", .{}) catch return;
+            blank.close();
+        }
+        const shell = std.fmt.bufPrint(&tunnel_shell, "{s} tunnel --url http://127.0.0.1:8080 --no-autoupdate --protocol http2 > tools\\tunnel.log 2>&1", .{cloudflaredPath()}) catch return;
+        tunnel_cmd[2] = shell;
+        setText(tunnel_line, "Opening the sign-on page and the mining port.");
+        tunnel_child = compat.Child.init(&tunnel_cmd, std.heap.page_allocator);
+        tunnel_child.stdout_behavior = .Ignore;
+        tunnel_child.stderr_behavior = .Ignore;
+        tunnel_child.create_no_window = true;
+        if (tunnel_child.spawn()) |_| {
+            tunnel_live = true;
+        } else |_| {
+            setText(tunnel_line, "cloudflared would not start. Opening the mining port anyway.");
+        }
     }
-    var blank = compat.fs.cwd().createFile("tools/tunnel.log", .{}) catch return;
-    blank.close();
-    setText(tunnel_line, "Asking Cloudflare for a free address…");
-    tunnel_argv[0] = cloudflaredPath();
-    tunnel_child = compat.Child.init(&tunnel_argv, std.heap.page_allocator);
-    tunnel_child.stdout_behavior = .Ignore;
-    tunnel_child.stderr_behavior = .Ignore;
-    tunnel_child.create_no_window = true;
-    tunnel_child.spawn() catch {
-        setText(tunnel_line, "cloudflared would not start. See tools/tunnel.log.");
-        return;
-    };
-    tunnel_live = true;
+    startMineRelay();
+    if (!tunnel_live) return;
     var scratch: [180]u8 = undefined;
     var tick: usize = 0;
     while (tick < 45 and tunnel_live) : (tick += 1) {
@@ -582,11 +643,14 @@ fn tunnelWorker() void {
         defer std.heap.page_allocator.free(log);
         if (tunnelUrl(log, &scratch)) |n| {
             _ = SetWindowTextA(tunnel_box, scratch[0..n :0]);
-            setText(tunnel_line, "Sign-on is public. Send that address. Mining ports stay on this PC.");
+            setText(tunnel_line, "Sign-on is the https address. Miners outside use the mining address.");
             return;
         }
     }
-    if (tunnel_live) setText(tunnel_line, "Still waiting. The address will land in the box, or see tools/tunnel.log.");
+    if (!tunnel_live) return;
+    var why: [140]u8 = undefined;
+    const detail = logTail("tools/tunnel.log", &why);
+    setText(tunnel_line, if (detail.len > 0) detail else "Sign-on tunnel did not print an address. See tools/tunnel.log. The mining address is separate.");
 }
 
 fn openTunnel() void {
@@ -601,15 +665,20 @@ fn closeTunnel() void {
     }
     tunnel_live = false;
     tunnel_child.kill();
+    var stop_cf = compat.Child.init(&.{ "taskkill", "/F", "/IM", "cloudflared.exe" }, std.heap.page_allocator);
+    stop_cf.stdout_behavior = .Ignore;
+    stop_cf.stderr_behavior = .Ignore;
+    stop_cf.create_no_window = true;
+    _ = stop_cf.spawnAndWait() catch {};
     _ = SetWindowTextA(tunnel_box, "");
     setText(tunnel_line, "Tunnel closed. The free address no longer works.");
 }
 
 fn miningPort() u16 {
     for (modules[0..module_count]) |m| {
-        if (m.on and m.port <= 55535) return m.port + 10000;
+        if (m.on) return m.port;
     }
-    return 13333;
+    return 3333;
 }
 
 fn borePath() []const u8 {
@@ -635,31 +704,30 @@ fn mineAddress(text: []const u8, out: []u8) ?usize {
     var end = at;
     while (end < text.len and text[end] != ' ' and text[end] != '\n' and text[end] != '\r' and text[end] != '"') end += 1;
     const host = text[at..end];
-    const wrote = std.fmt.bufPrint(out, "stratum+ssl://{s}", .{host}) catch return null;
+    const wrote = std.fmt.bufPrint(out, "stratum+tcp://{s}", .{host}) catch return null;
     if (wrote.len + 1 > out.len) return null;
     out[wrote.len] = 0;
     return wrote.len;
 }
 
-fn mineWorker() void {
-    if (mine_live) {
-        setText(mine_line, "A mining relay is already open. Close it first.");
-        return;
-    }
+fn startMineRelay() void {
+    if (mine_live) return;
     const port = miningPort();
     var local: [96]u8 = undefined;
-    const wrote = std.fmt.bufPrint(local[0..95], "stratum+ssl://127.0.0.1:{d}", .{port}) catch return;
+    const wrote = std.fmt.bufPrint(local[0..95], "stratum+tcp://127.0.0.1:{d}", .{port}) catch return;
     local[wrote.len] = 0;
     _ = SetWindowTextA(mine_box, local[0..wrote.len :0]);
     if (!ensureBore()) {
-        setText(mine_line, "Relay did not download. Miners on this PC use the address above.");
+        setText(mine_line, "The mining relay did not download. Miners on this PC use the address above.");
         return;
     }
     const shell = std.fmt.bufPrint(&mine_shell, "{s} local {d} --to bore.pub > tools\\bore.log 2>&1", .{ borePath(), port }) catch return;
     mine_argv[2] = shell;
-    var blank = compat.fs.cwd().createFile("tools/bore.log", .{}) catch return;
-    blank.close();
-    setText(mine_line, "Asking bore.pub for one TCP port. Local miners can already use the address above.");
+    {
+        var blank = compat.fs.cwd().createFile("tools/bore.log", .{}) catch return;
+        blank.close();
+    }
+    setText(mine_line, "Publishing the pool port. Miners outside this network use the address it prints.");
     mine_child = compat.Child.init(&mine_argv, std.heap.page_allocator);
     mine_child.stdout_behavior = .Ignore;
     mine_child.stderr_behavior = .Ignore;
@@ -677,11 +745,22 @@ fn mineWorker() void {
         defer std.heap.page_allocator.free(log);
         if (mineAddress(log, &scratch)) |n| {
             _ = SetWindowTextA(mine_box, scratch[0..n :0]);
-            setText(mine_line, "That is the mining port. The Cloudflare box is only the sign-on page.");
+            setText(mine_line, "That mining address is outside this network. Point a miner at it.");
             return;
         }
     }
-    if (mine_live) setText(mine_line, "Relay did not answer. Miners on this PC use the address above.");
+    if (!mine_live) return;
+    var why: [140]u8 = undefined;
+    const detail = logTail("tools/bore.log", &why);
+    setText(mine_line, if (detail.len > 0) detail else "The mining relay did not print an address. See tools/bore.log.");
+}
+
+fn mineWorker() void {
+    if (mine_live) {
+        setText(mine_line, "A mining relay is already open. Close it first.");
+        return;
+    }
+    startMineRelay();
 }
 
 fn openMine() void {
@@ -696,6 +775,11 @@ fn closeMine() void {
     }
     mine_live = false;
     mine_child.kill();
+    var stop_bore = compat.Child.init(&.{ "taskkill", "/F", "/IM", "bore.exe" }, std.heap.page_allocator);
+    stop_bore.stdout_behavior = .Ignore;
+    stop_bore.stderr_behavior = .Ignore;
+    stop_bore.create_no_window = true;
+    _ = stop_bore.spawnAndWait() catch {};
     setText(mine_line, "Mining relay closed. The public port no longer works.");
 }
 
@@ -776,17 +860,17 @@ fn settingsProc(window: HWND, msg: u32, wp: WPARAM, lp: LPARAM) callconv(.winapi
             _ = child(window, "STATIC", "MODULES", WS_CHILD | WS_VISIBLE, 12, 192, 80, 16, 4);
             settings_list = child(window, "LISTBOX", "", WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL, 12, 210, 850, 150, 20);
             _ = child(window, "STATIC", "SHOW A FRIEND", WS_CHILD | WS_VISIBLE, 12, 372, 120, 16, 44);
-            _ = child(window, "STATIC", "Free Cloudflare tunnel. No account. This publishes the sign-on page only.", WS_CHILD | WS_VISIBLE, 140, 372, 520, 16, 45);
+            _ = child(window, "STATIC", "Free tunnel. Sign-on on HTTPS, and the pool port as TCP so miners outside can connect.", WS_CHILD | WS_VISIBLE, 140, 372, 640, 16, 45);
             _ = child(window, "BUTTON", "Open free tunnel", WS_CHILD | WS_VISIBLE, 12, 394, 140, 26, 40);
             _ = child(window, "BUTTON", "Close tunnel", WS_CHILD | WS_VISIBLE, 160, 394, 110, 26, 41);
             tunnel_box = child(window, "EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | ES_READONLY, 280, 396, 580, 22, 42);
-            tunnel_line = child(window, "STATIC", "Not open. Friends cannot see this host yet.", WS_CHILD | WS_VISIBLE, 12, 426, 820, 16, 43);
+            tunnel_line = child(window, "STATIC", "Not open. Friends cannot sign on or mine from outside yet.", WS_CHILD | WS_VISIBLE, 12, 426, 820, 16, 43);
             _ = child(window, "STATIC", "MINING PORT", WS_CHILD | WS_VISIBLE, 12, 452, 110, 16, 48);
-            _ = child(window, "STATIC", "One stratum+ssl port. The Cloudflare button cannot carry it.", WS_CHILD | WS_VISIBLE, 130, 452, 520, 16, 49);
+            _ = child(window, "STATIC", "The public pool port. Plain stratum, opened with the tunnel.", WS_CHILD | WS_VISIBLE, 130, 452, 520, 16, 49);
             _ = child(window, "BUTTON", "Publish mining port", WS_CHILD | WS_VISIBLE, 12, 474, 160, 26, 46);
             _ = child(window, "BUTTON", "Close mining port", WS_CHILD | WS_VISIBLE, 180, 474, 140, 26, 47);
             mine_box = child(window, "EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | ES_READONLY, 330, 476, 530, 22, 50);
-            mine_line = child(window, "STATIC", "Not published. Miners on this PC still use port + 10000.", WS_CHILD | WS_VISIBLE, 12, 506, 820, 16, 51);
+            mine_line = child(window, "STATIC", "Not published. Open the tunnel, or publish this port on its own.", WS_CHILD | WS_VISIBLE, 12, 506, 820, 16, 51);
             paintSettingsList();
             _ = SetFocus(source_box);
             return 0;

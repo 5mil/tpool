@@ -388,10 +388,10 @@ On the host machine, tunnel 8080 (and the pool port if they will mine):
 cloudflared tunnel --url http://127.0.0.1:8080
 ```
 
-On Windows that button is in Thimble - Settings: Open free tunnel. It publishes the sign-on page only. Publish mining port is separate. The Cloudflare button cannot carry the stratum port.
+On Windows that button is in Thimble - Settings: Open free tunnel. It publishes the sign-on page and the plain stratum port, so a miner outside the network can connect. The mining address looks like `stratum+tcp://bore.pub:PORT`. Publish mining port does the pool port on its own if you already have a sign-on tunnel.
 
 Or `ngrok http 8080`. Give them the URL. They sign up in a browser. A miner points `--host` at that name and `--port` at the pool port you also exposed.
 
 ## Coin fetch
 
-http://127.0.0.1:8080/admin with the token from `host.cfg` (or `THIMBLE_ADMIN`). Repo must be `https://github.com/` or `https://gitlab.com/`. The host clones into `coin-src/` and writes `coin.cfg`. It does not compile the validator. The Windows Settings window is the path that builds and opens a pool from the known coin list, or from a repo you paste.
+http://127.0.0.1:8080/admin with the token from `host.cfg` (or `THIMBLE_ADMIN`). For Bitcoin, Litecoin, and Dogecoin the Windows host does not run a bare `make` on the git tree. That fails at once, because those coins are not a single Makefile. It downloads the official node, starts it, and opens the pool port when the node can serve a template. A new node still has to sync. Other repos are cloned into `coin-src/` and built only if they have a Makefile or CMakeLists.txt. The error line is the status, and `build.log` has the rest.

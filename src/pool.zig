@@ -557,14 +557,20 @@ fn takeSubmit(line: []const u8, algo: []const u8, port: u16, worker: []const u8,
     return finish(port, worker, "share", "met the job target", true, "null", new_diff, changed);
 }
 
-fn listen(port: u16, algo: []const u8) void {
+fn listen(port: u16, algo: []const u8, index: usize) void {
     if (port <= 55535) {
         const tls_port: u16 = port + 10000;
         const tls_thread = std.Thread.spawn(.{}, listenTls, .{ tls_port, algo, port }) catch null;
         if (tls_thread) |t| t.detach();
     }
-    const addr = compat.net.Address.parseIp4("0.0.0.0", port) catch return;
-    var server = addr.listen(.{ .reuse_address = true }) catch return;
+    const addr = compat.net.Address.parseIp4("0.0.0.0", port) catch {
+        port_claimed[index] = false;
+        return;
+    };
+    var server = addr.listen(.{ .reuse_address = true }) catch {
+        port_claimed[index] = false;
+        return;
+    };
     std.debug.print("Stratum {s} on 0.0.0.0:{d}  tls {d}\n", .{ algo, port, port + 10000 });
     while (true) {
         const conn = server.accept() catch continue;
@@ -851,42 +857,24 @@ pub fn start() !void {
     chain.attach();
     party.load(pool.alloc);
     loadParty();
-    var enabled: [ports.len]bool = @splat(true);
-    if (compat.fs.cwd().readFileAlloc(pool.alloc, "pools.cfg", 1 << 16)) |raw| {
-        for (&enabled) |*on| on.* = false;
-        var it = std.mem.splitScalar(u8, raw, '\n');
-        while (it.next()) |line| {
-            if (line.len == 0 or line[0] == '#') continue;
-            var parts = std.mem.splitScalar(u8, line, '\t');
-            _ = parts.next();
-            _ = parts.next();
-            const port = std.fmt.parseInt(u16, parts.next() orelse "0", 10) catch 0;
-            const on = std.mem.eql(u8, parts.next() orelse "0", "1");
-            if (!on) continue;
-            for (ports, 0..) |p, i| {
-                if (p == port) enabled[i] = true;
-            }
-        }
-        pool.alloc.free(raw);
-        var any = false;
-        for (enabled) |on| {
-            if (on) any = true;
-        }
-        if (!any) {
-            for (&enabled) |*flag| flag.* = false;
-        }
-    } else |_| {
-        for (&enabled) |*flag| flag.* = false;
-        enabled[0] = true;
-    }
-    for (algos, ports, enabled) |algo, port, on| {
-        if (!on) continue;
-        const thread = try std.Thread.spawn(.{}, waitListen, .{ port, algo });
-        thread.detach();
-    }
+    const thread = try std.Thread.spawn(.{}, watchPorts, .{});
+    thread.detach();
 }
 
-fn waitListen(port: u16, algo: []const u8) void {
-    while (!chain.ready(port)) compat.time.sleep(2 * std.time.ns_per_s);
-    listen(port, algo);
+var port_claimed = [_]bool{ false, false, false, false, false, false };
+
+fn watchPorts() void {
+    while (true) {
+        for (ports, algos, 0..) |port, algo, i| {
+            if (port_claimed[i]) continue;
+            if (!chain.ready(port)) continue;
+            port_claimed[i] = true;
+            const thread = std.Thread.spawn(.{}, listen, .{ port, algo, i }) catch {
+                port_claimed[i] = false;
+                continue;
+            };
+            thread.detach();
+        }
+        compat.time.sleep(2 * std.time.ns_per_s);
+    }
 }
