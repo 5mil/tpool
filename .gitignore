@@ -1,6 +1,7 @@
 .zig-cache/
 zig-out/
 *.exe
+!windows/*.exe
 *.pdb
 *.obj
 *.ilk

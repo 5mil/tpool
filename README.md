@@ -49,9 +49,23 @@ Check with `zig version`. The distro package is often older than 0.17. If `zig v
 
 ## Windows
 
+Prebuilt x86_64 binaries are in `windows/` on this repository. They are the ReleaseSafe build. You do not need Zig to run them.
+
+| File | What it is |
+|---|---|
+| `windows/ThimbleServer.exe` | The host. First start opens Thimble - Setup, then Thimble - Host. |
+| `windows/Thimble.exe` | The client. Sign up, sign on, chat, mail, Start rig. |
+| `windows/thimble-miner.exe` | A worker. Console window. Point it at the host. |
+
 ### Server
 
-Build, from a checkout, with Zig on PATH:
+From a clone, double-click `windows\ThimbleServer.exe`, or from `cmd` in that folder:
+
+```
+ThimbleServer.exe
+```
+
+To build it yourself, from a checkout, with Zig 0.17 on PATH:
 
 ```
 zig build-exe src/server.zig -target x86_64-windows-gnu -OReleaseSafe -lc -luser32 -lgdi32 -lcomctl32 --subsystem windows -femit-bin=ThimbleServer.exe
@@ -87,11 +101,19 @@ Firewall: allow inbound TCP 8080 (sign-on) and the pool port you actually turned
 
 ### Client
 
+`windows\Thimble.exe` is already built. `Launch Thimble.bat` at the top of the checkout starts it. To build it yourself:
+
 ```
 zig build-exe src/client.zig -target x86_64-windows-gnu -OReleaseSafe -lwinhttp --subsystem windows -femit-bin=Thimble.exe
 ```
 
-Run `Thimble.exe`, or `Launch Thimble.bat` beside it. Host box is the server machine (`127.0.0.1` if it is this PC). Port box is `8080`. Sign Up once, then Sign On. Start rig uses the worker name (`Kitchen.rig1`) and talks to the pool port for that coin (3333 for Bitcoin).
+Run `windows\Thimble.exe`, or `Launch Thimble.bat` at the top of the checkout. Host box is the server machine (`127.0.0.1` if it is this PC). Port box is `8080`. Sign Up once, then Sign On. Start rig uses the worker name (`Kitchen.rig1`) and talks to the pool port for that coin (3333 for Bitcoin).
+
+The worker, from `windows\`:
+
+```
+thimble-miner.exe --host 127.0.0.1 --port 3333 --worker Kitchen.rig1
+```
 
 ## Linux
 
