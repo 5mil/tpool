@@ -1,0 +1,6 @@
+# name, algorithm, port, on (1 or 0), merge child, bonus percent, source, wallet
+# A line with on=1 listens only after that source can serve a template.
+# Bitcoin	sha256d	3333	0	none	0		
+# Litecoin	scrypt	3334	0	Dogecoin	0		
+#house	0
+#data	all

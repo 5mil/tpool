@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Thimble</title>
+<style>
+  body { margin:0; background:#008080; font-family:Tahoma, sans-serif; color:#142033; }
+  #stage { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:16px; }
+  .card, #app { width:min(980px, 100%); background:#f7f5ef; border:3px solid #16356b; }
+  .brand { text-align:center; padding:16px 12px 4px; color:#16356b; }
+  .on { font-family:Georgia, serif; font-style:italic; font-size:34px; }
+  .form { padding:8px 36px 12px; }
+  label { display:block; margin:8px 0 4px; font-size:13px; }
+  input, select, textarea { width:100%; padding:6px; box-sizing:border-box; }
+  .row { display:flex; justify-content:flex-end; gap:8px; padding:0 36px 16px; }
+  button { height:28px; min-width:88px; }
+  .hidden { display:none !important; }
+  #app { height:min(720px, calc(100vh - 24px)); display:flex; flex-direction:column; background:#d4d0c8; }
+  #title { background:linear-gradient(90deg,#000080,#1084d0); color:#fff; padding:4px 8px; font-weight:700; }
+  #body { flex:1; display:flex; min-height:0; background:#fff; }
+  #rooms, #side { width:180px; padding:8px; background:#f4f7fb; overflow:auto; }
+  #center { flex:1; display:flex; flex-direction:column; }
+  #log, #mail { flex:1; overflow:auto; padding:8px; font-size:13px; }
+  .me { color:#003399; } .sys { color:#666; font-style:italic; }
+  #composer { display:flex; gap:6px; padding:8px; background:#d4d0c8; }
+  #composer input { flex:1; }
+  .err { color:#800; font-size:13px; min-height:18px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <section class="card" id="signon">
+    <div class="brand"><div class="on">thimble</div></div>
+    <div class="form">
+      <label>Select Screen Name</label>
+      <input id="screenName" value="SteveCaseFan" maxlength="16">
+      <label>Enter Password</label>
+      <input id="password" type="password" value="">
+      <label>Room</label>
+      <select id="room"></select>
+      <div class="err" id="err"></div>
+      <p style="font-size:12px;color:#555">Sign up once. The screen name is stored on this server. The password is stored as a hash.</p>
+    </div>
+    <div class="row">
+      <button id="signup">Sign Up</button>
+      <button id="signin">Sign On</button>
+    </div>
+  </section>
+  <section id="app" class="hidden">
+    <div id="title">Thimble</div>
+    <div id="body">
+      <aside id="rooms"></aside>
+      <div id="center">
+        <div id="log"></div>
+        <div id="mail" class="hidden"></div>
+        <form id="composer"><input id="cin" placeholder="Talk in the room"><button>Send</button></form>
+        <form id="mailform" class="hidden">
+          <input id="to" placeholder="To screen name">
+          <input id="subject" placeholder="Subject">
+          <textarea id="body" placeholder="Message" style="height:70px"></textarea>
+          <button>Send Mail</button>
+        </form>
+      </div>
+      <aside id="side"><b id="whoami"></b><div id="flag"></div><button id="readMail" type="button">Read Mail</button><button id="writeMail" type="button">Write</button><button id="backChat" type="button">People</button><div id="online"></div></aside>
+    </div>
+  </section>
+</div>
+<script>
+let token = "", room = "Lobby", since = 0, timer = null;
+const $ = (id) => document.getElementById(id);
+async function api(path, payload) {
+  const res = await fetch(path, { method: payload ? "POST" : "GET", headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) }, body: payload ? JSON.stringify(payload) : undefined });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Request failed");
+  return data;
+}
+function add(cls, text) { const d = document.createElement("div"); d.className = cls; d.textContent = text; $("log").appendChild(d); $("log").scrollTop = $("log").scrollHeight; }
+async function enter(path) {
+  $("err").textContent = "";
+  try {
+    const data = await api(path, { screenName: $("screenName").value.trim(), password: $("password").value });
+    token = data.token; room = $("room").value; since = 0;
+    $("signon").classList.add("hidden"); $("app").classList.remove("hidden");
+    $("whoami").textContent = data.screenName;
+    $("log").innerHTML = "";
+    add("sys", "Online as " + data.screenName + ". This room is stored on the server.");
+    poll(); timer = setInterval(poll, 2000);
+  } catch (e) { $("err").textContent = e.message; }
+}
+async function poll() {
+  const data = await api("/api/messages?room=" + encodeURIComponent(room) + "&since=" + since);
+  data.messages.forEach(m => { since = m.id; add(m.name === $("whoami").textContent ? "me" : "", m.name + ":  " + m.body); });
+  $("flag").textContent = data.unread ? data.unread + " unread" : "No new mail";
+  $("online").innerHTML = "<b>Online</b>" + data.online.map(n => "<div>● " + n + "</div>").join("");
+}
+$("signup").onclick = () => enter("/api/signup");
+$("signin").onclick = () => enter("/api/login");
+$("composer").onsubmit = async (e) => {
+  e.preventDefault();
+  const text = $("cin").value.trim(); if (!text) return; $("cin").value = "";
+  await api("/api/messages", { room, text });
+};
+$("rooms").onclick = (e) => { const r = e.target.getAttribute("data-room"); if (!r) return; room = r; since = 0; $("log").innerHTML = ""; add("sys", "You have entered " + r + "."); };
+$("readMail").onclick = async () => {
+  const data = await api("/api/mail");
+  $("log").classList.add("hidden"); $("composer").classList.add("hidden"); $("mailform").classList.add("hidden"); $("mail").classList.remove("hidden");
+  $("mail").innerHTML = data.mail.map(m => `<p><b>${m.subject}</b> from ${m.sender}<br>${m.body}</p>`).join("") || "<p>No mail.</p>";
+};
+$("writeMail").onclick = () => { $("log").classList.add("hidden"); $("composer").classList.add("hidden"); $("mail").classList.add("hidden"); $("mailform").classList.remove("hidden"); };
+$("backChat").onclick = () => { $("mail").classList.add("hidden"); $("mailform").classList.add("hidden"); $("log").classList.remove("hidden"); $("composer").classList.remove("hidden"); };
+$("mailform").onsubmit = async (e) => { e.preventDefault(); await api("/api/mail", { to: $("to").value.trim(), subject: $("subject").value, body: $("body").value }); $("body").value = ""; $("backChat").click(); };
+api("/api/rooms").then(data => {
+  $("room").innerHTML = data.rooms.map(r => `<option>${r}</option>`).join("");
+  $("rooms").innerHTML = "<b>Rooms</b>" + data.rooms.map(r => `<div data-room="${r}">${r}</div>`).join("");
+});
+</script>
+</body>
+</html>

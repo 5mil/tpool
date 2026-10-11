@@ -1,0 +1,1203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title>Thimble</title>
+<HTA:APPLICATION ID="thimble" APPLICATIONNAME="Thimble" BORDER="thin" CAPTION="yes" SHOWINTASKBAR="yes" SINGLEINSTANCE="yes" SYSMENU="yes" SCROLL="no" WINDOWSTATE="normal" INNERBORDER="no" />
+<style>
+  :root {
+    --navy: #000080;
+    --aol: #003399;
+    --aol2: #1c4ea3;
+    --gold: #f0c419;
+    --win: #d4d0c8;
+    --face: #ece9d8;
+    --lavender: #c9c6ef;
+    --ink: #111;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; font-family: Tahoma, "MS Sans Serif", Arial, sans-serif; background: #008080; color: var(--ink); }
+  button, input, select, textarea { font-family: Tahoma, Arial, sans-serif; font-size: 12px; }
+  button { cursor: pointer; }
+  .hidden { display: none !important; }
+
+  /* Windows 98 desktop */
+  #os {
+    height: 100%; display: flex; flex-direction: column;
+    background: #008080 url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8'><rect width='8' height='8' fill='%23008080'/><rect width='1' height='1' fill='%23006666'/></svg>");
+  }
+  #icons { padding: 14px; display: flex; flex-direction: column; gap: 16px; align-items: flex-start; }
+  .desk-icon { width: 86px; text-align: center; color: #fff; font-size: 11px; text-shadow: 1px 1px 0 #003; cursor: pointer; user-select: none; }
+  .desk-icon .glyph { width: 42px; height: 42px; margin: 0 auto 4px; }
+  .desk-icon.sel { background: #000080; outline: 1px dotted #fff; }
+  #taskbar {
+    height: 30px; background: var(--win); border-top: 2px solid #fff; display: flex; align-items: center; gap: 4px; padding: 2px 4px;
+  }
+  #start {
+    height: 24px; padding: 0 8px 0 4px; font-weight: bold; font-size: 12px;
+    background: var(--win); border-top: 1px solid #fff; border-left: 1px solid #fff; border-right: 1px solid #404040; border-bottom: 1px solid #404040;
+    display: flex; align-items: center; gap: 4px;
+  }
+  #start b { font-style: italic; }
+  .taskbtn {
+    height: 24px; min-width: 140px; text-align: left; padding: 0 8px;
+    background: var(--win); border-top: 1px solid #fff; border-left: 1px solid #fff; border-right: 1px solid #404040; border-bottom: 1px solid #404040;
+  }
+  .taskbtn.on { background: #c6c3bb; border-top: 1px solid #404040; border-left: 1px solid #404040; border-right: 1px solid #fff; border-bottom: 1px solid #fff; }
+  #tray { margin-left: auto; height: 24px; border-top: 1px solid #808080; border-left: 1px solid #808080; border-right: 1px solid #fff; border-bottom: 1px solid #fff; padding: 0 8px; display: flex; align-items: center; font-size: 11px; gap: 8px; background: var(--win); }
+
+  /* App frame */
+  #app {
+    position: absolute; left: 40px; top: 24px; width: min(1040px, calc(100% - 60px)); height: min(700px, calc(100% - 70px));
+    background: var(--win); border: 2px solid; border-color: #fff #404040 #404040 #fff;
+    display: flex; flex-direction: column; box-shadow: 2px 2px 0 #000; z-index: 5;
+  }
+  #titlebar {
+    height: 22px; background: linear-gradient(90deg, #000080, #1084d0); color: #fff; display: flex; align-items: center; padding: 0 3px; font-size: 12px; font-weight: bold;
+    user-select: none;
+  }
+  #titlebar .tb-ico { width: 16px; height: 16px; margin-right: 4px; }
+  #titlebar .cap { flex: 1; }
+  .wbtn { width: 16px; height: 14px; margin-left: 2px; background: var(--win); color: #000; border: 1px solid; border-color: #fff #404040 #404040 #fff; font-size: 10px; line-height: 10px; padding: 0; font-weight: bold; }
+  #menubar { height: 20px; background: var(--win); display: flex; align-items: center; padding: 0 2px; font-size: 12px; border-bottom: 1px solid #808080; position: relative; }
+  .menu { padding: 1px 7px; position: relative; }
+  .menu:hover, .menu.open { background: #000080; color: #fff; }
+  .dropdown {
+    display: none; position: absolute; top: 18px; left: 0; min-width: 190px; background: var(--win); color: #000;
+    border: 2px solid; border-color: #fff #404040 #404040 #fff; z-index: 50; padding: 2px 0; box-shadow: 2px 2px 0 #000;
+  }
+  .menu.open .dropdown { display: block; }
+  .dropdown div { padding: 3px 22px 3px 18px; white-space: nowrap; }
+  .dropdown div:hover { background: #000080; color: #fff; }
+  .dropdown hr { border: 0; border-top: 1px solid #808080; border-bottom: 1px solid #fff; margin: 3px 2px; }
+  #toolbar {
+    background: var(--win); border-bottom: 1px solid #808080; display: flex; align-items: center; gap: 2px; padding: 3px 4px; flex-wrap: wrap;
+  }
+  .tool {
+    width: 28px; height: 26px; background: var(--win); border: 1px solid transparent; padding: 0; display: flex; align-items: center; justify-content: center;
+  }
+  .tool:hover { border-color: #fff #404040 #404040 #fff; }
+  .tool span { font-size: 14px; }
+  .kw { margin-left: auto; display: flex; align-items: center; gap: 4px; font-size: 11px; }
+  .kw input { width: 120px; height: 20px; border: 1px solid; border-color: #808080 #fff #fff #808080; padding: 1px 4px; }
+  #workspace { flex: 1; position: relative; background: #7a7a7a; overflow: hidden; }
+  #statusbar {
+    height: 22px; background: var(--win); border-top: 1px solid #fff; display: flex; align-items: center; font-size: 11px; padding: 0 4px; gap: 6px;
+  }
+  .sbox { border: 1px solid; border-color: #808080 #fff #fff #808080; padding: 1px 6px; height: 16px; display: flex; align-items: center; }
+  #simtag { margin-left: auto; color: #444; }
+
+  /* child windows */
+  .win {
+    position: absolute; background: var(--face); border: 2px solid; border-color: #fff #404040 #404040 #fff;
+    box-shadow: 1px 1px 0 #000; display: flex; flex-direction: column; min-width: 280px; min-height: 160px;
+  }
+  .win .wt {
+    height: 18px; background: linear-gradient(90deg, #000080, #1084d0); color: #fff; font-size: 11px; font-weight: bold;
+    display: flex; align-items: center; padding: 0 2px 0 4px; cursor: move; user-select: none;
+  }
+  .win .wt .wc { margin-left: auto; }
+  .win .wb { flex: 1; overflow: auto; padding: 8px; background: #fff; margin: 2px; border: 1px solid; border-color: #808080 #fff #fff #808080; }
+  .win .wb.plain { background: var(--face); }
+
+  /* sign on */
+  #signon {
+    position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%); width: 460px; background: #f7f6f1;
+    border: 2px solid; border-color: #fff #404040 #404040 #fff; box-shadow: 3px 3px 0 #000; z-index: 20;
+  }
+  .logo-row { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 16px 12px 6px; }
+  .wordmark { line-height: 1; }
+  .wordmark .am { font-size: 13px; letter-spacing: 3px; color: #163a72; font-weight: 700; }
+  .wordmark .on { font-family: "Palatino Linotype", Georgia, serif; font-style: italic; font-size: 32px; color: #163a72; margin-top: -4px; }
+  .form { padding: 8px 28px 12px; }
+  .form label { display: block; font-size: 12px; margin: 6px 0 2px; }
+  .form input, .form select { width: 100%; height: 22px; border: 1px solid; border-color: #808080 #fff #fff #808080; padding: 1px 4px; }
+  .rowbtns { display: flex; justify-content: flex-end; gap: 8px; padding: 4px 28px 14px; }
+  .aolbtn {
+    min-width: 86px; height: 24px; background: var(--win); border: 2px solid; border-color: #fff #404040 #404040 #fff; font-size: 12px;
+  }
+  .aolbtn:active { border-color: #404040 #fff #fff #404040; }
+  .aolbtn.primary { font-weight: bold; }
+  .fine { font-size: 10px; color: #444; text-align: center; padding-bottom: 8px; }
+  .chk { font-size: 11px; display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+
+  /* dial splash */
+  #dial {
+    position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%); width: 520px; background: #fbfaf6;
+    border: 2px solid; border-color: #fff #404040 #404040 #fff; box-shadow: 3px 3px 0 #000; z-index: 30; padding: 16px 22px 18px;
+  }
+  .panels { display: flex; gap: 0; margin-top: 10px; align-items: stretch; }
+  .panel {
+    flex: 1; height: 92px; background: var(--lavender); border: 3px solid #163a72; display: flex; align-items: center; justify-content: center; position: relative;
+  }
+  .panel + .panel { border-left: none; }
+  .dialstatus { text-align: center; margin-top: 10px; font-size: 14px; color: #222; min-height: 20px; }
+  .dialbar { height: 3px; background: #222; margin: 8px 40px 0; }
+  .steps { font-size: 11px; color: #333; margin-top: 8px; min-height: 32px; text-align: center; }
+  #runner { width: 46px; height: 46px; transition: transform .35s linear; }
+
+  /* welcome */
+  .welcome { display: flex; height: 100%; min-height: 320px; background: #fff; padding: 0; }
+  .wleft { width: 168px; background: linear-gradient(#0a3d91, #082e78); color: #fff; padding: 10px 8px; }
+  .wleft .chbtn, .wleft .sidebtn {
+    display: block; width: 100%; margin: 6px 0; background: #1d4eae; color: #fff; border: 1px solid #9cf; border-radius: 3px; padding: 6px 4px; font-weight: bold; font-size: 13px;
+  }
+  .wleft .sidebtn { background: #4b2d8c; }
+  .mailflag { margin-top: 14px; background: #0b4cab; border-radius: 4px; padding: 8px; display: flex; gap: 8px; align-items: center; cursor: pointer; }
+  .mailflag .flag { font-size: 22px; }
+  .wright { flex: 1; padding: 10px 12px; }
+  .story { border-bottom: 1px solid #ddd; padding: 6px 0; cursor: pointer; }
+  .story b { color: #003399; }
+  .story:hover b { text-decoration: underline; }
+  .places { display: flex; gap: 8px; margin-top: 8px; }
+  .place { flex: 1; border: 1px solid #9bb; background: #f4f7fb; padding: 6px; font-size: 11px; cursor: pointer; text-align: center; }
+  .place:hover { background: #e4eefc; }
+
+  .channel h2 { margin: 0 0 6px; color: #003399; font-size: 18px; }
+  .channel .lead { color: #444; font-size: 12px; margin-bottom: 8px; }
+  .card { border: 1px solid #c5c5c5; padding: 8px; margin: 6px 0; background: #fafafa; cursor: pointer; }
+  .card:hover { background: #eef4ff; }
+  .card b { color: #003399; }
+
+  table.grid { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.grid th { background: #003399; color: #fff; text-align: left; padding: 3px 6px; font-weight: normal; }
+  table.grid td { padding: 3px 6px; border-bottom: 1px solid #ddd; }
+  table.grid tr.unread td { font-weight: bold; }
+  table.grid tr.sel td { background: #000080; color: #fff; }
+  table.grid tr:hover td { background: #d6e4ff; color: #000; }
+
+  .chatlayout { display: flex; height: 100%; min-height: 280px; gap: 6px; }
+  .chatlog { flex: 1; border: 1px solid #808080; background: #fff; overflow: auto; padding: 6px; font-size: 12px; font-family: Verdana, Arial, sans-serif; }
+  .chatlog .me { color: #003399; }
+  .chatlog .sys { color: #666; font-style: italic; }
+  .members { width: 130px; border: 1px solid #808080; background: #fff; overflow: auto; font-size: 11px; }
+  .members div { padding: 2px 4px; }
+  .chatinput { display: flex; gap: 4px; margin-top: 4px; }
+  .chatinput input { flex: 1; height: 22px; }
+  .imbody { font-family: Verdana, Arial, sans-serif; font-size: 12px; white-space: pre-wrap; }
+  .compose label { display: block; font-size: 11px; margin-top: 4px; }
+  .compose input, .compose textarea { width: 100%; border: 1px solid #808080; }
+  .compose textarea { height: 140px; }
+
+  #modal {
+    position: absolute; inset: 0; background: rgba(0,0,0,.25); z-index: 80; display: flex; align-items: center; justify-content: center;
+  }
+  #modal .box { width: 340px; background: var(--win); border: 2px solid; border-color: #fff #404040 #404040 #fff; box-shadow: 2px 2px 0 #000; }
+  #modal .mt { background: linear-gradient(90deg, #000080, #1084d0); color: #fff; font-weight: bold; font-size: 12px; padding: 3px 6px; }
+  #modal .mb { padding: 12px; font-size: 13px; background: var(--face); }
+  #ygm { text-align: center; }
+  #ygm .big { font-size: 20px; color: #003399; font-weight: bold; margin: 6px 0; }
+  #goodbye {
+    position: absolute; inset: 0; background: #000; color: #fff; z-index: 90; display: flex; align-items: center; justify-content: center; flex-direction: column; text-align: center;
+  }
+  #goodbye h1 { font-weight: normal; font-size: 28px; margin: 8px 0; letter-spacing: 1px; }
+  #toast {
+    position: absolute; right: 12px; bottom: 36px; background: #ffffe1; border: 1px solid #000; padding: 6px 8px; font-size: 11px; z-index: 70; box-shadow: 2px 2px 0 #000; max-width: 240px;
+  }
+  #selftest { position: absolute; left: 8px; bottom: 36px; background: #ffffe1; border: 1px solid #000; padding: 6px; font-size: 11px; z-index: 70; max-width: 360px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div id="os">
+  <div id="icons">
+    <div class="desk-icon" id="aolIcon" title="Thimble">
+      <div class="glyph" id="deskLogo"></div>
+      Thimble
+    </div>
+    <div class="desk-icon" id="mailIcon">
+      <div class="glyph">📬</div>
+      Mail
+    </div>
+  </div>
+  <div style="flex:1"></div>
+  <div id="taskbar">
+    <button id="start"><svg width="16" height="16" viewBox="0 0 16 16"><rect width="16" height="16" fill="#008040"/><path d="M2 8 L8 2 L8 6 L14 6 L14 10 L8 10 L8 14 Z" fill="#fff"/></svg> <b>Start</b></button>
+    <button class="taskbtn hidden" id="taskAOL">Thimble</button>
+    <div id="tray"><span id="clock">5:03 PM</span></div>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <div id="titlebar">
+    <span class="tb-ico" id="titleLogo"></span>
+    <span class="cap" id="caption">Thimble</span>
+    <button class="wbtn" id="minBtn">_</button>
+    <button class="wbtn" id="maxBtn">□</button>
+    <button class="wbtn" id="closeBtn">×</button>
+  </div>
+  <div id="menubar">
+    <div class="menu">File<div class="dropdown">
+      <div data-act="print">Print…</div>
+      <div data-act="save">Save to Filing Cabinet</div>
+      <hr>
+      <div data-act="signoff">Sign Off</div>
+      <div data-act="exit">Exit</div>
+    </div></div>
+    <div class="menu">Edit<div class="dropdown">
+      <div data-act="copy">Copy</div>
+      <div data-act="selectall">Select All</div>
+    </div></div>
+    <div class="menu">Go To<div class="dropdown">
+      <div data-act="welcome">Welcome</div>
+      <div data-act="channels">Channels</div>
+      <div data-act="keyword">Keyword…</div>
+      <div data-kw="people">People Connection</div>
+      <div data-kw="internet">Internet</div>
+      <div data-kw="favorites">Favorite Places</div>
+    </div></div>
+    <div class="menu">Mail<div class="dropdown">
+      <div data-act="readmail">Read Mail</div>
+      <div data-act="compose">Write Mail</div>
+      <div data-act="sent">Sent Mail</div>
+      <div data-act="address">Address Book</div>
+      <hr>
+      <div data-act="autool">Set up automatic sign-on</div>
+    </div></div>
+    <div class="menu">Members<div class="dropdown">
+      <div data-act="buddy">Buddy List</div>
+      <div data-act="im">Send Instant Message</div>
+      <div data-act="directory">Member Directory</div>
+      <div data-act="parental">Parental Controls</div>
+    </div></div>
+    <div class="menu">Window<div class="dropdown">
+      <div data-act="cascade">Cascade</div>
+      <div data-act="closeall">Close All</div>
+    </div></div>
+    <div class="menu">Help<div class="dropdown">
+      <div data-act="help">Member Services</div>
+      <div data-act="about">About Thimble</div>
+    </div></div>
+    <div class="menu" id="signOffMenu">Sign Off</div>
+  </div>
+  <div id="toolbar">
+    <button class="tool" title="Read Mail" data-act="readmail"><span>📬</span></button>
+    <button class="tool" title="Write Mail" data-act="compose"><span>✉️</span></button>
+    <button class="tool" title="Mail Center" data-act="readmail"><span>📮</span></button>
+    <button class="tool" title="People Connection" data-kw="people"><span>👥</span></button>
+    <button class="tool" title="Favorites" data-kw="favorites"><span>⭐</span></button>
+    <button class="tool" title="Internet" data-kw="internet"><span>🌐</span></button>
+    <button class="tool" title="Quotes" data-kw="stocks"><span>📈</span></button>
+    <button class="tool" title="Weather" data-kw="weather"><span>⛅</span></button>
+    <button class="tool" title="You've Got Pictures" data-kw="pictures"><span>📷</span></button>
+    <button class="tool" title="Print" data-act="print"><span>🖨️</span></button>
+    <button class="tool" title="Help" data-act="help"><span>❓</span></button>
+    <div class="kw">Keyword <input id="keyword" placeholder="mail, chat, news…"> <button class="aolbtn" id="goKw" style="min-width:42px">Go</button></div>
+  </div>
+  <div id="workspace"></div>
+  <div id="statusbar">
+    <div class="sbox" id="stOnline">Offline</div>
+    <div class="sbox" id="stSpeed"></div>
+    <div class="sbox" id="stTime"></div>
+    <div class="sbox" id="stHours"></div>
+    <div id="simtag">A nod to the old sign-on. Not that network.</div>
+  </div>
+</div>
+
+<div id="signon" class="hidden">
+  <div class="logo-row" id="signLogo"></div>
+  <div class="form">
+    <label>Select Screen Name</label>
+    <input id="screenName" list="names" value="SteveCaseFan" autocomplete="off">
+    <datalist id="names">
+      <option value="SteveCaseFan">
+      <option value="Guest">
+      <option value="CoolDude95">
+    </datalist>
+    <label>Enter Password</label>
+    <input id="password" type="password" value="••••">
+    <label>Select Location</label>
+    <select id="location">
+      <option value="home">Home — (703) 555-0142</option>
+      <option value="office">Office — dial 9, (212) 555-0199</option>
+      <option value="hotel">Hotel — (312) 555-0177</option>
+      <option value="busy">Busy exchange — (202) 555-0100</option>
+    </select>
+    <label class="chk"><input type="checkbox" id="speaker" checked> Modem speaker on</label>
+  </div>
+  <div class="rowbtns">
+    <button class="aolbtn" id="setupBtn">Setup</button>
+    <button class="aolbtn primary" id="signOnBtn">Sign On</button>
+  </div>
+  <div class="fine">Thimble 5.0 for Windows · offline recreation</div>
+</div>
+
+<div id="dial" class="hidden">
+  <div class="logo-row" id="dialLogo"></div>
+  <div class="panels">
+    <div class="panel" id="p1"></div>
+    <div class="panel" id="p2"></div>
+    <div class="panel" id="p3"></div>
+  </div>
+  <div class="dialstatus" id="dialStatus">Dialing...</div>
+  <div class="dialbar"></div>
+  <div class="steps" id="dialSteps"></div>
+  <div class="rowbtns" style="padding-right:0"><button class="aolbtn" id="cancelDial">Cancel</button></div>
+</div>
+
+<div id="modal" class="hidden">
+  <div class="box">
+    <div class="mt" id="modalTitle">Thimble</div>
+    <div class="mb" id="modalBody"></div>
+    <div class="rowbtns" id="modalBtns"></div>
+  </div>
+</div>
+<div id="goodbye" class="hidden">
+  <div id="byeLogo"></div>
+  <h1>Goodbye</h1>
+  <div id="byeSub">from Thimble</div>
+</div>
+<div id="toast" class="hidden"></div>
+<div id="selftest" class="hidden"></div>
+
+<script>
+const LOGO = `<svg class="mark" width="78" height="64" viewBox="0 0 78 64" aria-label="Thimble">
+  <polygon points="39,3 74,61 4,61" fill="#163a72"/>
+  <circle cx="39" cy="38" r="15" fill="#f7f4ea"/>
+  <g transform="translate(22,24)" fill="#f0c419" stroke="#163a72" stroke-width="1.2">
+    <circle cx="10" cy="5" r="3.2" fill="#f0c419"/>
+    <path d="M8 9 L14 12 L20 9 L16 16 L22 22 L14 18 L10 26 L9 17 L2 18 Z"/>
+  </g>
+</svg>`;
+const RUNNER = `<svg id="runner" viewBox="0 0 64 64">
+  <circle cx="28" cy="14" r="7" fill="#f0c419" stroke="#163a72" stroke-width="2"/>
+  <path d="M20 24 L38 30 L50 22 L42 36 L54 48 L36 40 L30 58 L28 40 L12 44 Z" fill="#f0c419" stroke="#163a72" stroke-width="2"/>
+</svg>`;
+
+document.getElementById("deskLogo").innerHTML = LOGO;
+document.getElementById("titleLogo").innerHTML = LOGO.replace('width="78" height="64"', 'width="16" height="14"');
+document.getElementById("signLogo").innerHTML = LOGO + `<div class="wordmark"><div class="am">AMERICA</div><div class="on">Online</div></div>`;
+document.getElementById("dialLogo").innerHTML = document.getElementById("signLogo").innerHTML;
+document.getElementById("byeLogo").innerHTML = LOGO;
+
+const channels = {
+  news: { title: "Today's News", lead: "October 7, 1999 — headlines from the News channel.", items: [
+    ["Senate opens debate on campaign finance", "Washington — floor speeches ran past midnight. Members in the Politics forum are already arguing about it."],
+    ["Dow closes above 10,600", "Blue chips climbed again. See Personal Finance for delayed quotes."],
+    ["Hurricane warning posted for the Outer Banks", "Coastal members should check the Weather keyword before traveling."],
+    ["NASA sets new shuttle launch window", "Endeavour's next flight slips two days. The Space forum has the manifest."]
+  ]},
+  sports: { title: "Sports", lead: "Scores, clubs, and the Grandstand.", items: [
+    ["Yankees take Game 2 of the ALCS", "Bernie Williams' double in the 7th was the difference. Chat live in Yankees Club."],
+    ["NFL Week 5: Packers at Bucs Sunday", "Fantasy football desk opens at noon. Keyword: FOOTBALL"],
+    ["Serena Williams reaches the final", "A new star on the women's tour. Tennis forum is packed."]
+  ]},
+  entertainment: { title: "Entertainment", lead: "Movies, music, and television.", items: [
+    ["You've Got Mail is still renting", "The mailbox comedy keeps the Entertainment channel busy. Tom and Meg, again."],
+    ["Buffy the Vampire Slayer boards are open", "Tonight's episode thread is already 400 posts deep."],
+    ["New albums: Santana, Backstreet Boys, TLC", "Listen to 30-second clips in the Music forum — modem willing."]
+  ]},
+  finance: { title: "Personal Finance", lead: "Delayed quotes. Not a broker. Not advice.", items: [
+    ["Thimble 92 1/4", "Up 3 on heavier volume. Message boards are glowing."],
+    ["YHOO 84 1/2", "Yahoo holds after a split rumor that members already debunked."],
+    ["AMZN 80 3/8", "Bookstore to everything-store. The Investing folder has both sides."]
+  ]},
+  travel: { title: "Travel", lead: "Reservations desks and destination folders.", items: [
+    ["Fall foliage in New England", "Member photos from Vermont. Keyword: FOLIAGE"],
+    ["Fare watcher: BOS to MCO $159", "A weekend special. Travelocity desk inside Thimble."],
+    ["Disney board warns about October crowds", "Parents in Kids Only are swapping fast-pass rumors that do not exist yet."]
+  ]},
+  computing: { title: "Computing", lead: "Downloads, drivers, and the PC help forum.", items: [
+    ["Windows 98 Second Edition tips", "How to stop the Active Desktop from redrawing every time you sign on."],
+    ["Y2K checklist for members", "Set the clock forward in a test folder. Do not do it on the family PC the night before."],
+    ["File library: WinZip, mIRC, ICQ", "Scan before you run. Member Services is not your antivirus."]
+  ]},
+  kids: { title: "Kids Only", lead: "A quieter corner. Parental Controls can lock this to Kids Only.", items: [
+    ["Homework help: fractions", "Tutors are in the classroom from 4 to 6."],
+    ["Nickelodeon clubhouse", "Rugrats coloring pages download as .gif files."],
+    ["Book of the week: Holes", "Sachas are comparing the ending. No spoilers in the lobby."]
+  ]},
+  games: { title: "Games", lead: "Slingo, NTN trivia, and a round you can play offline.", items: [
+    ["Slingo night", "The slots-and-bingo hybrid. Simulated table is open."],
+    ["NTN trivia in the lounge", "Five questions. Bragging rights only."],
+    ["Role-playing: Neverwinter is full", "Try the GemStone board if the shard is busy."]
+  ]},
+  shopping: { title: "Marketplace", lead: "The marketplace, such as it was.", items: [
+    ["1-800-FLOWERS", "Mother's Day is months away. They are already advertising."],
+    ["Barnes & Noble", "Ship in 3 to 5 days. Tracking by email."],
+    ["Thimble store: shirts with the running man", "Members still want the triangle on a sweatshirt."]
+  ]},
+  health: { title: "Health", lead: "Forums, not a doctor.", items: [
+    ["Flu season folder", "Members comparing symptoms. Call a real doctor."],
+    ["Fitness challenge", "A 30-day walk club with a sign-in board."]
+  ]},
+  education: { title: "Education", lead: "Research, courses, and the reference desk.", items: [
+    ["Compton's encyclopedia excerpt", "Short articles you can save to the Filing Cabinet."],
+    ["College board", "Application deadlines for the class of 2004."]
+  ]},
+  pictures: { title: "You've Got Pictures", lead: "The Kodak drop. Film developed yesterday can land here.", items: [
+    ["Roll 2148 — 24 exposures", "Beach, 1999. Two are backlit. You can still mail them."],
+    ["Roll 2201 — birthday", "Candles, slightly blurry. Classic."]
+  ]},
+  help: { title: "Member Services", lead: "How this recreation behaves.", items: [
+    ["Sign on", "Any screen name. Any password. Nothing leaves this machine."],
+    ["Keywords", "mail, chat, news, sports, games, weather, stocks, kids, people, finance, travel, computing, entertainment, pictures, help, internet, favorites, buddy"],
+    ["Dial-up", "The speaker checkbox plays a synthesized handshake. Cancel returns you to Sign On."],
+    ["Mail and IM", "Saved only in this browser. A buddy may reply a few seconds later."]
+  ]}
+};
+
+const quotes = [
+  ["Thimble", "92 1/4", "+3"],
+  ["YHOO", "84 1/2", "+1 1/8"],
+  ["AMZN", "80 3/8", "-2"],
+  ["MSFT", "91 1/16", "+5/8"],
+  ["CSCO", "68 3/4", "+1 1/4"],
+  ["INTC", "74 1/2", "-3/8"]
+];
+
+const rooms = [
+  { name: "Lobby", topic: "Welcome. Be 13 or older in member rooms." },
+  { name: "Romance", topic: "The usual. aol:// if you must." },
+  { name: "Thirtysomething", topic: "Work, kids, and the modem in the kitchen." },
+  { name: "X-Files", topic: "The truth is in here." },
+  { name: "Sports Bar", topic: "No spoilers for the West Coast feed." },
+  { name: "Computer Help", topic: "Have your modem string ready." },
+  { name: "New Member Lounge", topic: "Screen names, buddy lists, and keywords." }
+];
+
+const chatter = ["CoolDude95","SoccerMom22","BuffyFan","XFilesRule","NetNinja","JazzCat","MomOf3","PCLoadLetter","Y2KReady","StarWarsKid","BookWorm","HoopsFan","SurferGirl","ModemQueen","CaseWatcher"];
+const lines = [
+  "brb phone", "lol", "anyone from ohio?", "asl", "the handshake took forever tonight",
+  "keyword news is slow", "my mom is on the phone line", "you've got mail irl too",
+  "who else is on a 56k?", "don't click the cd that came in the mail, you already have 5.0",
+  "wb", "gtg dinner", "the running man is still running", "is steve case in here? no."
+];
+
+let state = {
+  online: false,
+  name: "SteveCaseFan",
+  seconds: 0,
+  speed: "",
+  timer: null,
+  chatTimer: null,
+  z: 10,
+  wins: 0,
+  cancelled: false,
+  audio: null
+};
+
+function loadMail() {
+  try { return JSON.parse(localStorage.getItem("thimble-mail") || "null") || seedMail(); }
+  catch (e) { return seedMail(); }
+}
+function seedMail() {
+  return [
+    { id: 1, from: "ThimbleNews", to: "SteveCaseFan", subject: "You've Got Mail — and a news brief", body: "Welcome back.\n\nThe News channel lead tonight: campaign finance on the Senate floor, and a hurricane watch on the Carolina coast.\n\nKeyword: NEWS", unread: true, box: "in", when: "6:41 PM" },
+    { id: 2, from: "CoolDude95", to: "SteveCaseFan", subject: "you on tonight?", body: "meet in the lobby after you sign on. bring the trivia answers.\n\n-cd", unread: true, box: "in", when: "5:12 PM" },
+    { id: 3, from: "MemberServices", to: "SteveCaseFan", subject: "Your plan: 5 hours included", body: "This recreation does not bill you.\n\nOn the real service in 1995, five hours were included and extra time was a few dollars an hour. By 5.0, unlimited plans were the pitch.\n\nPassword stays on this PC. It is not transmitted.", unread: true, box: "in", when: "Yesterday" },
+    { id: 4, from: "PictureMail", to: "SteveCaseFan", subject: "You've Got Pictures", body: "Roll 2148 is ready in You've Got Pictures.\nKeyword: PICTURES", unread: false, box: "in", when: "Mon" }
+  ];
+}
+let mail = loadMail();
+function saveMail() { localStorage.setItem("thimble-mail", JSON.stringify(mail)); }
+
+function $(id) { return document.getElementById(id); }
+function toast(t) {
+  const el = $("toast");
+  el.textContent = t;
+  el.classList.remove("hidden");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.classList.add("hidden"), 2800);
+}
+function modal(title, html, buttons) {
+  $("modalTitle").textContent = title;
+  $("modalBody").innerHTML = html;
+  const b = $("modalBtns");
+  b.innerHTML = "";
+  buttons.forEach(btn => {
+    const e = document.createElement("button");
+    e.className = "aolbtn" + (btn.primary ? " primary" : "");
+    e.textContent = btn.label;
+    e.onclick = () => { $("modal").classList.add("hidden"); btn.fn && btn.fn(); };
+    b.appendChild(e);
+  });
+  $("modal").classList.remove("hidden");
+}
+
+function openApp() {
+  $("app").classList.remove("hidden");
+  $("taskAOL").classList.remove("hidden");
+  $("taskAOL").classList.add("on");
+  $("signon").classList.remove("hidden");
+  $("caption").textContent = "Thimble — Sign On";
+}
+$("aolIcon").ondblclick = openApp;
+$("mailIcon").ondblclick = () => { openApp(); };
+$("taskAOL").onclick = () => {
+  if ($("app").classList.contains("hidden")) openApp();
+  else { $("app").classList.add("hidden"); $("taskAOL").classList.remove("on"); }
+};
+$("minBtn").onclick = () => { $("app").classList.add("hidden"); $("taskAOL").classList.remove("on"); };
+$("closeBtn").onclick = () => doExit();
+$("maxBtn").onclick = () => {
+  const a = $("app");
+  if (a.dataset.max) { a.style.left = "40px"; a.style.top = "24px"; a.style.width = ""; a.style.height = ""; a.dataset.max = ""; }
+  else { a.style.left = "0"; a.style.top = "0"; a.style.width = "100%"; a.style.height = "calc(100% - 30px)"; a.dataset.max = "1"; }
+};
+
+document.querySelectorAll(".menu").forEach(m => {
+  m.onclick = (ev) => {
+    if (m.id === "signOffMenu") { doSignOff(); return; }
+    document.querySelectorAll(".menu").forEach(x => { if (x !== m) x.classList.remove("open"); });
+    m.classList.toggle("open");
+    ev.stopPropagation();
+  };
+});
+document.body.addEventListener("click", () => document.querySelectorAll(".menu").forEach(x => x.classList.remove("open")));
+document.body.addEventListener("click", (ev) => {
+  const act = ev.target.getAttribute && ev.target.getAttribute("data-act");
+  const kw = ev.target.getAttribute && ev.target.getAttribute("data-kw");
+  if (kw) goKeyword(kw);
+  if (act) doAct(act);
+});
+
+function doAct(act) {
+  if (!state.online && !["exit","about","help"].includes(act)) {
+    if (act === "exit") return doExit();
+    toast("Sign on first.");
+    return;
+  }
+  if (act === "readmail") openMail();
+  else if (act === "compose") openCompose();
+  else if (act === "sent") openMail("sent");
+  else if (act === "address") openAddress();
+  else if (act === "welcome") openWelcome();
+  else if (act === "channels") openChannels();
+  else if (act === "buddy") openBuddy();
+  else if (act === "im") openIM();
+  else if (act === "directory") openDirectory();
+  else if (act === "parental") openParental();
+  else if (act === "help") openChannel("help");
+  else if (act === "about") about();
+  else if (act === "signoff") doSignOff();
+  else if (act === "exit") doExit();
+  else if (act === "print") toast("Sent to the printer queue. (Simulated.)");
+  else if (act === "save") { toast("Saved to the Filing Cabinet."); speak("File's done"); }
+  else if (act === "keyword") { $("keyword").focus(); }
+  else if (act === "autool") modal("Automatic sign-on", "Automatic sign-on would sign on, grab mail, and hang up to save hourly charges. In this recreation it just marks the inbox as downloaded.", [{label:"OK", primary:true}]);
+  else if (act === "cascade") cascade();
+  else if (act === "closeall") $("workspace").innerHTML = "";
+  else if (act === "copy" || act === "selectall") toast("Edit commands are local to the text fields.");
+}
+
+function about() {
+  modal("About Thimble", "Thimble 5.0 recreation<br><br>Looks and sounds like the dial-up client: sign-on, handshake, Welcome, mail, People Connection, keywords, buddy list.<br><br>A nod to the old sign-on, welcome, and mail. Not that company. Nothing dials out.", [{label:"OK", primary:true}]);
+}
+
+$("setupBtn").onclick = () => modal("Setup", "Expert Setup<br><br>Modem: Sportster 56K Fax (simulated)<br>Init string: AT&F1E0Q0V1&C1&D2<br>Dial prefix: ATDT<br>Access numbers are fictional 555 numbers.<br><br>TCP/IP location is not configured. This program never dials a real line.", [{label:"OK", primary:true}]);
+
+$("signOnBtn").onclick = startDial;
+$("password").addEventListener("keydown", e => { if (e.key === "Enter") startDial(); });
+$("cancelDial").onclick = () => { state.cancelled = true; stopAudio(); $("dial").classList.add("hidden"); $("signon").classList.remove("hidden"); };
+
+function numberFor(loc) {
+  if (loc === "office") return "9,12125550199";
+  if (loc === "hotel") return "13125550177";
+  if (loc === "busy") return "12025550100";
+  return "17035550142";
+}
+
+async function startDial() {
+  const name = $("screenName").value.trim() || "Guest";
+  if (name.length < 3 || name.length > 16 || /\s/.test(name)) {
+    modal("Thimble", "Screen names are 3 to 16 characters with no spaces.", [{label:"OK", primary:true}]);
+    return;
+  }
+  state.name = name;
+  state.cancelled = false;
+  $("signon").classList.add("hidden");
+  $("dial").classList.remove("hidden");
+  $("p1").innerHTML = RUNNER;
+  $("p2").innerHTML = "";
+  $("p3").innerHTML = "";
+  const loc = $("location").value;
+  const num = numberFor(loc);
+  const steps = [
+    ["Initializing modem…", "Sportster 56K responds OK."],
+    ["Dialing " + num.replace(/(\d{3})(\d{3})(\d{4})/, "($1) $2-$3") + "…", "Speaker is " + ($("speaker").checked ? "on." : "off.")],
+    ["Ringing…", "Waiting for the access number."],
+    ["Connecting at 28800 bps…", "Modems negotiate V.34. A 56K link often settled lower."],
+    ["Requesting network attention…", "Sending the synchronize characters."],
+    ["Talking to network…", "Thimble software identifies itself."],
+    ["Connecting to Thimble…", "Contacting the host."],
+    ["Checking password…", "Screen name " + name + " — password stays on this PC."]
+  ];
+  if ($("speaker").checked) playHandshake(num, loc === "busy");
+  for (let i = 0; i < steps.length; i++) {
+    if (state.cancelled) return;
+    $("dialStatus").textContent = steps[i][0];
+    $("dialSteps").textContent = steps[i][1];
+    const slot = i < 2 ? "p1" : i < 5 ? "p2" : "p3";
+    ["p1","p2","p3"].forEach(p => { if (p !== slot) $(p).innerHTML = ""; });
+    $(slot).innerHTML = RUNNER;
+    await wait(loc === "busy" && i === 2 ? 1600 : 900);
+    if (loc === "busy" && i === 2) {
+      stopAudio();
+      $("dialStatus").textContent = "Busy.";
+      $("dialSteps").textContent = "The access number is busy. Thimble would try the next number.";
+      await wait(900);
+      if (!state.cancelled) modal("Thimble", "Unable to connect. The access number is busy. Choose another location.", [{label:"OK", primary:true, fn: () => { $("dial").classList.add("hidden"); $("signon").classList.remove("hidden"); }}]);
+      return;
+    }
+  }
+  if (state.cancelled) return;
+  $("dial").classList.add("hidden");
+  connected();
+}
+
+function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function connected() {
+  state.online = true;
+  state.seconds = 0;
+  state.speed = "28800 bps";
+  $("caption").textContent = "Thimble";
+  $("stOnline").textContent = "Online — " + state.name;
+  $("stSpeed").textContent = state.speed;
+  $("stHours").textContent = "Unlimited plan (sim)";
+  clearInterval(state.timer);
+  state.timer = setInterval(() => {
+    state.seconds++;
+    const s = state.seconds;
+    $("stTime").textContent = "Online " + String(Math.floor(s/60)).padStart(2,"0") + ":" + String(s%60).padStart(2,"0");
+  }, 1000);
+  $("workspace").innerHTML = "";
+  openWelcome();
+  openBuddy();
+  const unread = mail.filter(m => m.box === "in" && m.unread && (m.to === state.name || m.to === "SteveCaseFan")).length;
+  setTimeout(() => { speak("Welcome"); youveGotMail(unread); }, 500);
+}
+
+function youveGotMail(n) {
+  if ($("speaker").checked) chime();
+  speak("You've got mail");
+  const noun = n === 1 ? "1 new mail message" : n + " new mail messages";
+  $("modalTitle").textContent = "Thimble";
+  $("modalBody").innerHTML = `<div id="ygm"><div style="font-size:40px">📫</div><div class="big">You've Got Mail!</div><div>${n ? noun : "No new mail, but the flag still waves."}</div></div>`;
+  $("modalBtns").innerHTML = "";
+  const read = document.createElement("button");
+  read.className = "aolbtn primary";
+  read.textContent = "Read Mail";
+  read.onclick = () => { $("modal").classList.add("hidden"); openMail(); };
+  const later = document.createElement("button");
+  later.className = "aolbtn";
+  later.textContent = "Later";
+  later.onclick = () => $("modal").classList.add("hidden");
+  $("modalBtns").appendChild(read);
+  $("modalBtns").appendChild(later);
+  $("modal").classList.remove("hidden");
+}
+
+function win(title, html, x, y, w, h) {
+  state.wins++;
+  const el = document.createElement("div");
+  el.className = "win";
+  el.style.left = (x || 16 + (state.wins % 5) * 18) + "px";
+  el.style.top = (y || 12 + (state.wins % 5) * 16) + "px";
+  el.style.width = (w || 520) + "px";
+  el.style.height = (h || 360) + "px";
+  el.style.zIndex = ++state.z;
+  el.innerHTML = `<div class="wt"><span class="wtitle"></span><span class="wc"><button class="wbtn xmin">_</button><button class="wbtn xclose">×</button></span></div><div class="wb"></div>`;
+  el.querySelector(".wtitle").textContent = title;
+  el.querySelector(".wb").innerHTML = html;
+  el.querySelector(".xclose").onclick = () => el.remove();
+  el.querySelector(".xmin").onclick = () => { el.style.display = "none"; toast(title + " minimized. Cascade to show windows."); };
+  const bar = el.querySelector(".wt");
+  bar.onmousedown = (ev) => {
+    if (ev.target.tagName === "BUTTON") return;
+    el.style.zIndex = ++state.z;
+    const ox = ev.clientX - el.offsetLeft, oy = ev.clientY - el.offsetTop;
+    function mv(e) { el.style.left = (e.clientX - ox) + "px"; el.style.top = (e.clientY - oy) + "px"; }
+    function up() { document.removeEventListener("mousemove", mv); document.removeEventListener("mouseup", up); }
+    document.addEventListener("mousemove", mv);
+    document.addEventListener("mouseup", up);
+  };
+  el.onmousedown = () => el.style.zIndex = ++state.z;
+  $("workspace").appendChild(el);
+  return el;
+}
+function cascade() {
+  [...$("workspace").children].forEach((el, i) => {
+    el.style.display = "";
+    el.style.left = 12 + i * 18 + "px";
+    el.style.top = 12 + i * 16 + "px";
+  });
+}
+
+function openWelcome() {
+  const unread = mail.filter(m => m.box === "in" && m.unread).length;
+  const html = `<div class="welcome">
+    <div class="wleft">
+      <div style="text-align:center">${LOGO.replace('width="78" height="64"', 'width="64" height="52"')}<div style="font-family:Georgia,serif;font-style:italic;font-size:20px">Online</div></div>
+      <button class="chbtn" data-act="channels">Channels</button>
+      <button class="sidebtn" data-kw="news">What's New</button>
+      <div class="mailflag" data-act="readmail"><span class="flag">${unread ? "📫" : "📪"}</span><div><b>${unread ? "You Have Mail" : "No New Mail"}</b><div style="font-size:10px">${unread} unread</div></div></div>
+      <div class="mailflag" data-kw="internet"><span class="flag">🌐</span><div><b>Internet</b><div style="font-size:10px">browser</div></div></div>
+    </div>
+    <div class="wright">
+      <div style="color:#003399;font-weight:bold">Welcome, ${state.name}</div>
+      <div style="font-size:11px;color:#666;margin-bottom:6px">Today · My Places · You've Got Pictures</div>
+      <div class="story" data-kw="news"><b>EASIEST way around.</b> Channels on the left. Keywords up top. People Connection if you came here to talk.</div>
+      <div class="story" data-kw="help"><b>NEED TO KNOW.</b> Member Services explains this recreation. Your password never leaves the computer.</div>
+      <div class="story" data-kw="pictures"><b>YOU'VE GOT PICTURES.</b> Two rolls are waiting from the Kodak drop.</div>
+      <div class="story" data-kw="news"><b>TOP NEWS STORY.</b> Senate debate runs long. Hurricane watch on the Banks.</div>
+      <div class="places">
+        <div class="place" data-kw="weather">My Weather<br>72° and fair</div>
+        <div class="place" data-kw="stocks">My Quotes<br>Thimble +3</div>
+        <div class="place" data-kw="people">People<br>Lobby is open</div>
+        <div class="place" data-kw="games">Games<br>Trivia tonight</div>
+      </div>
+    </div>
+  </div>`;
+  const w = win("Welcome", html, 18, 16, 560, 380);
+  w.querySelector(".wb").style.padding = "0";
+  w.querySelector(".wb").style.background = "#fff";
+}
+
+function openChannels() {
+  const keys = Object.keys(channels).filter(k => k !== "help" && k !== "pictures");
+  const html = `<div class="channel"><h2>Channels</h2><div class="lead">Fourteen doors, same as the main menu era. Click one.</div>
+    ${keys.map(k => `<div class="card" data-kw="${k}"><b>${channels[k].title}</b><div>${channels[k].lead}</div></div>`).join("")}
+  </div>`;
+  win("Channels", html, 40, 30, 420, 400);
+}
+
+function openChannel(key) {
+  const c = channels[key];
+  if (!c) { toast("Keyword not found: " + key); return; }
+  const html = `<div class="channel"><h2>${c.title}</h2><div class="lead">${c.lead}</div>
+    ${c.items.map((it, i) => `<div class="card" data-article="${key}:${i}"><b>${it[0]}</b><div>${it[1]}</div></div>`).join("")}
+  </div>`;
+  win(c.title, html, 70, 40, 460, 360);
+}
+
+function openArticle(key, i) {
+  const it = channels[key].items[i];
+  win(it[0], `<div class="channel"><h2>${it[0]}</h2><p>${it[1]}</p><p style="color:#666;font-size:11px">Posted to the ${channels[key].title} channel. Filing Cabinet can keep a copy. Print sends a simulated job.</p></div>`, 90, 50, 420, 260);
+}
+
+function openMail(box) {
+  box = box || "in";
+  const rows = mail.filter(m => m.box === box && (box === "sent" ? m.from === state.name : true));
+  const html = `<div style="margin-bottom:6px"><button class="aolbtn" data-act="compose">Write</button>
+    <button class="aolbtn" id="readSel">Read</button>
+    <button class="aolbtn" id="delSel">Delete</button></div>
+    <table class="grid" id="mailgrid"><tr><th></th><th>From</th><th>Subject</th><th>Date</th></tr>
+    ${rows.map(m => `<tr data-id="${m.id}" class="${m.unread ? "unread" : ""}"><td>${m.unread ? "✉" : ""}</td><td>${box === "sent" ? m.to : m.from}</td><td>${m.subject}</td><td>${m.when}</td></tr>`).join("") || `<tr><td colspan="4">No mail in this box.</td></tr>`}
+    </table>`;
+  const w = win(box === "sent" ? "Sent Mail" : "Mailbox — " + state.name, html, 48, 36, 520, 300);
+  let sel = null;
+  w.querySelectorAll("tr[data-id]").forEach(tr => tr.onclick = () => {
+    w.querySelectorAll("tr").forEach(x => x.classList.remove("sel"));
+    tr.classList.add("sel");
+    sel = tr.getAttribute("data-id");
+  });
+  w.querySelector("#readSel").onclick = () => { if (sel) readMessage(sel); else toast("Select a message."); };
+  w.querySelector("#delSel").onclick = () => {
+    if (!sel) return toast("Select a message.");
+    mail = mail.filter(m => String(m.id) !== String(sel));
+    saveMail(); w.remove(); openMail(box);
+  };
+}
+
+function readMessage(id) {
+  const m = mail.find(x => String(x.id) === String(id));
+  if (!m) return;
+  m.unread = false; saveMail();
+  win(m.subject, `<div class="channel"><div style="font-size:12px;color:#333">From: ${m.from}<br>To: ${m.to}<br>Date: ${m.when}<br>Subject: ${m.subject}</div><hr><pre style="white-space:pre-wrap;font-family:Verdana,Arial;font-size:13px">${m.body}</pre>
+    <button class="aolbtn" id="reply">Reply</button></div>`, 80, 44, 440, 300)
+    .querySelector("#reply").onclick = () => openCompose(m.from, "Re: " + m.subject, "\n\n--- original ---\n" + m.body);
+}
+
+function openCompose(to, subject, body) {
+  const html = `<div class="compose">
+    <label>To</label><input id="cto" value="${to || ""}">
+    <label>Subject</label><input id="csub" value="${subject || ""}">
+    <label>Message</label><textarea id="cbody">${body || ""}</textarea>
+    <div style="margin-top:6px"><button class="aolbtn primary" id="send">Send Now</button></div>
+  </div>`;
+  const w = win("Write Mail", html, 100, 60, 420, 340);
+  w.querySelector("#send").onclick = () => {
+    const msg = { id: Date.now(), from: state.name, to: w.querySelector("#cto").value || "Friend", subject: w.querySelector("#csub").value || "(no subject)", body: w.querySelector("#cbody").value, unread: false, box: "sent", when: "Just now" };
+    mail.push(msg); saveMail();
+    toast("Mail sent.");
+    w.remove();
+    setTimeout(() => {
+      mail.push({ id: Date.now()+1, from: msg.to, to: state.name, subject: "Re: " + msg.subject, body: "got it. signing on was the usual circus.\n\n- " + msg.to, unread: true, box: "in", when: "Just now" });
+      saveMail();
+      if ($("speaker").checked) chime();
+      speak("You've got mail");
+      toast("You've Got Mail");
+    }, 2200);
+  };
+}
+
+function openAddress() {
+  win("Address Book", `<table class="grid"><tr><th>Name</th><th>Screen name</th></tr>
+    <tr><td>Chris</td><td>CoolDude95</td></tr>
+    <tr><td>Mom</td><td>SoccerMom22</td></tr>
+    <tr><td>News</td><td>ThimbleNews</td></tr></table>`, 60, 40, 320, 200);
+}
+
+function openBuddy() {
+  const buds = ["CoolDude95","SoccerMom22","BuffyFan","JazzCat","PCLoadLetter"];
+  const html = `<div style="font-size:11px;margin-bottom:4px">Buddies Online (${buds.length})</div>
+    ${buds.map(b => `<div style="padding:3px 0;cursor:pointer" data-im="${b}">● ${b}</div>`).join("")}
+    <div style="margin-top:8px"><button class="aolbtn" data-act="im">IM</button> <button class="aolbtn" id="setupb">Setup</button></div>
+    <div style="font-size:10px;color:#666;margin-top:6px">Keyword: BuddyView</div>`;
+  const w = win("Buddy List", html, 600, 20, 200, 240);
+  w.querySelector("#setupb").onclick = () => toast("Buddy groups: Buddies, Family, Co-Workers.");
+}
+
+function openIM(to) {
+  const html = `<div class="compose"><label>To</label><input id="imto" value="${to || "CoolDude95"}">
+    <div class="imbody" id="imlog" style="border:1px solid #808080;height:140px;overflow:auto;padding:4px;margin:4px 0;background:#fff"></div>
+    <input id="imtext" placeholder="Type an instant message">
+    <div style="margin-top:4px"><button class="aolbtn primary" id="imsend">Send</button></div></div>`;
+  const w = win("Instant Message", html, 120, 70, 380, 280);
+  const log = w.querySelector("#imlog");
+  function push(who, text) { log.innerHTML += `<div><b>${who}:</b> ${text}</div>`; log.scrollTop = log.scrollHeight; }
+  w.querySelector("#imsend").onclick = () => {
+    const text = w.querySelector("#imtext").value.trim();
+    if (!text) return;
+    w.querySelector("#imtext").value = "";
+    push(state.name, text);
+    if ($("speaker").checked) door();
+    setTimeout(() => {
+      push(w.querySelector("#imto").value || "Buddy", ["brb","lol ok","on the phone line","what's the keyword?","gtg"][Math.floor(Math.random()*5)]);
+      if ($("speaker").checked) door();
+    }, 900);
+  };
+  w.querySelector("#imtext").addEventListener("keydown", e => { if (e.key === "Enter") w.querySelector("#imsend").click(); });
+}
+
+function openDirectory() {
+  win("Member Directory", `<div class="compose"><label>Search screen name or profile</label><input id="dq" value=""><button class="aolbtn" id="ds">Search</button><div id="dr" style="margin-top:8px;font-size:12px"></div></div>`, 80, 50, 380, 220)
+    .querySelector("#ds").onclick = function() {
+      const q = this.parentNode.querySelector("#dq").value || "member";
+      this.parentNode.querySelector("#dr").innerHTML = `3 profiles mention "${q}".<br>● CoolDude95 — Ohio, 17, computers<br>● ModemQueen — night shift, 56k<br>● CaseWatcher — collects install CDs`;
+    };
+}
+
+function openParental() {
+  win("Parental Controls", `<div class="channel"><h2>Parental Controls</h2><p>Kids Only, Young Teen, Mature Teen, General.</p><p>In 5.0 these gates sat on mail, IM, chat, and the web proxy. Here they are a switch you can flip. They do not phone home.</p>
+    <label><input type="radio" name="pc" checked> General (18+)</label><br>
+    <label><input type="radio" name="pc"> Kids Only</label></div>`, 90, 60, 360, 220);
+}
+
+function openPeople() {
+  const html = `<div class="channel"><h2>People Connection</h2><div class="lead">Find a room. The lobby never really emptied.</div>
+    ${rooms.map(r => `<div class="card" data-room="${r.name}"><b>${r.name}</b><div>${r.topic}</div></div>`).join("")}
+  </div>`;
+  win("People Connection", html, 36, 28, 420, 340);
+}
+
+function openRoom(name) {
+  const room = rooms.find(r => r.name === name) || rooms[0];
+  const members = chatter.slice(0, 8);
+  const html = `<div class="chatlayout"><div style="flex:1;display:flex;flex-direction:column"><div class="chatlog" id="clog"></div>
+    <div class="chatinput"><input id="cin" placeholder="Talk in ${room.name}"><button class="aolbtn" id="csend">Send</button></div></div>
+    <div class="members">${members.map(m => `<div>● ${m}</div>`).join("")}<div style="padding:4px;color:#666">${members.length} of 23</div></div></div>`;
+  const w = win("Chat — " + room.name, html, 24, 20, 560, 340);
+  w.querySelector(".wb").style.padding = "4px";
+  const log = w.querySelector("#clog");
+  function add(cls, text) { const d = document.createElement("div"); d.className = cls; d.textContent = text; log.appendChild(d); log.scrollTop = log.scrollHeight; }
+  add("sys", "You have entered " + room.name + ". " + room.topic);
+  if ($("speaker").checked) door();
+  add("sys", members[0] + ": wb");
+  const iv = setInterval(() => {
+    if (!document.body.contains(w)) return clearInterval(iv);
+    const who = members[Math.floor(Math.random()*members.length)];
+    add("", who + ":  " + lines[Math.floor(Math.random()*lines.length)]);
+  }, 3500);
+  function send() {
+    const t = w.querySelector("#cin").value.trim();
+    if (!t) return;
+    w.querySelector("#cin").value = "";
+    add("me", state.name + ":  " + t);
+  }
+  w.querySelector("#csend").onclick = send;
+  w.querySelector("#cin").addEventListener("keydown", e => { if (e.key === "Enter") send(); });
+}
+
+function openWeather() {
+  win("Weather", `<div class="channel"><h2>My Weather</h2><p>Vienna, VA · 72° · Fair · Wind 6 mph</p><p>Tonight 58°. Tomorrow 75° and a chance of a dial-up thunderstorm, which is just a regular thunderstorm near a phone line.</p>
+    <div class="card"><b>Outer Banks</b><div>Hurricane watch. Small craft should stay in.</div></div></div>`, 110, 40, 380, 240);
+}
+
+function openStocks() {
+  win("Quotes", `<table class="grid"><tr><th>Symbol</th><th>Last</th><th>Change</th></tr>
+    ${quotes.map(q => `<tr><td>${q[0]}</td><td>${q[1]}</td><td>${q[2]}</td></tr>`).join("")}
+    </table><p style="font-size:11px;color:#666">Delayed at least 15 minutes. 1999 fractions, not decimals. Not a solicitation.</p>`, 130, 36, 360, 240);
+}
+
+function openInternet() {
+  const html = `<div style="background:#ccc;padding:4px;display:flex;gap:4px"><input id="url" value="http://thimble" style="flex:1"><button class="aolbtn" id="go">Go</button></div>
+    <div id="page" style="padding:8px;font-size:13px"><b>thimble</b><p>The portal, inside the portal. Search, news, and a reminder that the wider web is one proxy hop away.</p>
+    <div class="card" data-kw="news">News</div><div class="card" data-kw="shopping">Shopping</div></div>`;
+  const w = win("Thimble — Internet", html, 50, 24, 500, 320);
+  w.querySelector("#go").onclick = () => {
+    const u = w.querySelector("#url").value;
+    w.querySelector("#page").innerHTML = `<b>${u}</b><p>The browser would have fetched this through the proxy. This recreation stays on your machine and shows a local stand-in page.</p><p style="color:#666">Favorites can remember the address.</p>`;
+  };
+}
+
+function openFavorites() {
+  win("Favorite Places", `<div class="card" data-kw="people"><b>People Connection</b></div><div class="card" data-kw="news"><b>Today's News</b></div><div class="card" data-kw="games"><b>Games</b></div><p style="font-size:11px">The heart icon on a real window dropped the place in here.</p>`, 70, 48, 320, 220);
+}
+
+function openGames() {
+  openChannel("games");
+  const html = `<div class="channel"><h2>NTN-style trivia</h2><div id="q"></div><div id="score"></div></div>`;
+  const w = win("Trivia", html, 150, 70, 400, 240);
+  const qs = [
+    ["The running-man logo is what color?", ["Yellow", "Red", "Green"], 0],
+    ["You've Got Mail was a movie in…", ["1998", "1989", "2004"], 0],
+    ["A busy signal means…", ["Try the next access number", "You won a prize", "The host owes you an hour"], 0]
+  ];
+  let i = 0, score = 0;
+  function draw() {
+    if (i >= qs.length) { w.querySelector("#q").innerHTML = "Done. " + score + " / " + qs.length; return; }
+    w.querySelector("#q").innerHTML = `<p>${qs[i][0]}</p>` + qs[i][1].map((a, n) => `<button class="aolbtn ans" data-n="${n}" style="display:block;margin:4px 0">${a}</button>`).join("");
+    w.querySelectorAll(".ans").forEach(b => b.onclick = () => {
+      if (Number(b.dataset.n) === qs[i][2]) score++;
+      i++; w.querySelector("#score").textContent = "Score " + score;
+      draw();
+    });
+  }
+  draw();
+}
+
+function goKeyword(raw) {
+  if (!state.online) { toast("Sign on first."); return; }
+  const k = String(raw || "").trim().toLowerCase();
+  const map = { mail: "readmail", chat: "people", people: "people", "people connection": "people", im: "im", buddy: "buddy", buddylist: "buddy", internet: "internet", weather: "weather", stocks: "stocks", quotes: "stocks", favorites: "favorites", games: "games", channels: "channels", pictures: "pictures", newsstand: "entertainment" };
+  if (map[k] === "readmail") return openMail();
+  if (map[k] === "people") return openPeople();
+  if (map[k] === "im") return openIM();
+  if (map[k] === "buddy") return openBuddy();
+  if (map[k] === "internet") return openInternet();
+  if (map[k] === "weather") return openWeather();
+  if (map[k] === "stocks") return openStocks();
+  if (map[k] === "favorites") return openFavorites();
+  if (map[k] === "games") return openGames();
+  if (map[k] === "channels") return openChannels();
+  if (channels[k] || channels[map[k]]) return openChannel(channels[k] ? k : map[k]);
+  toast("No keyword \"" + raw + "\". Try mail, chat, news, games.");
+}
+$("goKw").onclick = () => goKeyword($("keyword").value);
+$("keyword").addEventListener("keydown", e => { if (e.key === "Enter") goKeyword($("keyword").value); });
+
+$("workspace").addEventListener("click", (ev) => {
+  const t = ev.target.closest("[data-kw],[data-act],[data-room],[data-im],[data-article]");
+  if (!t) return;
+  if (t.dataset.kw) goKeyword(t.dataset.kw);
+  if (t.dataset.act) doAct(t.dataset.act);
+  if (t.dataset.room) openRoom(t.dataset.room);
+  if (t.dataset.im) openIM(t.dataset.im);
+  if (t.dataset.article) { const [k, i] = t.dataset.article.split(":"); openArticle(k, Number(i)); }
+});
+
+function doSignOff() {
+  if (!state.online) { $("signon").classList.remove("hidden"); return; }
+  state.online = false;
+  clearInterval(state.timer);
+  $("workspace").innerHTML = "";
+  $("stOnline").textContent = "Offline";
+  $("stSpeed").textContent = "";
+  $("stTime").textContent = "";
+  if ($("speaker").checked) hangup();
+  speak("Goodbye");
+  $("goodbye").classList.remove("hidden");
+  $("byeSub").textContent = "from Thimble\n" + state.name + " · online " + state.seconds + " seconds";
+  setTimeout(() => {
+    $("goodbye").classList.add("hidden");
+    $("signon").classList.remove("hidden");
+    $("caption").textContent = "Thimble — Sign On";
+  }, 2200);
+}
+function doExit() {
+  state.online = false;
+  clearInterval(state.timer);
+  stopAudio();
+  $("app").classList.add("hidden");
+  $("signon").classList.add("hidden");
+  $("dial").classList.add("hidden");
+  $("taskAOL").classList.add("hidden");
+}
+
+function tickClock() {
+  const d = new Date();
+  let h = d.getHours(), m = String(d.getMinutes()).padStart(2,"0");
+  const ap = h >= 12 ? "PM" : "AM"; h = h % 12 || 12;
+  $("clock").textContent = h + ":" + m + " " + ap;
+}
+setInterval(tickClock, 10000); tickClock();
+
+/* audio — synthesized dial-up and the sign-on cues. Not the copyrighted recordings. */
+function ctx() {
+  if (!state.audio) state.audio = new (window.AudioContext || window.webkitAudioContext)();
+  if (state.audio.state === "suspended") state.audio.resume();
+  return state.audio;
+}
+function tone(freq, t, dur, type, gain) {
+  const c = ctx();
+  const o = c.createOscillator();
+  const g = c.createGain();
+  o.type = type || "sine";
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(gain || 0.05, t + 0.02);
+  g.gain.setValueAtTime(gain || 0.05, t + Math.max(0.03, dur - 0.03));
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(c.destination);
+  o.start(t); o.stop(t + dur + 0.02);
+}
+function noise(t, dur, gain, freq) {
+  const c = ctx();
+  const n = c.createBuffer(1, Math.max(1, c.sampleRate * dur), c.sampleRate);
+  const d = n.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  const s = c.createBufferSource();
+  s.buffer = n;
+  const f = c.createBiquadFilter();
+  f.type = "bandpass"; f.frequency.value = freq || 1800; f.Q.value = 0.6;
+  const g = c.createGain();
+  g.gain.setValueAtTime(gain || 0.08, t);
+  s.connect(f); f.connect(g); g.connect(c.destination);
+  s.start(t); s.stop(t + dur);
+}
+function sweep(t, from, to, dur, type, gain) {
+  const c = ctx();
+  const o = c.createOscillator();
+  const g = c.createGain();
+  o.type = type || "sawtooth";
+  o.frequency.setValueAtTime(from, t);
+  o.frequency.exponentialRampToValueAtTime(Math.max(40, to), t + dur);
+  g.gain.value = gain || 0.03;
+  o.connect(g); g.connect(c.destination);
+  o.start(t); o.stop(t + dur);
+}
+function answerTone(t) {
+  const c = ctx();
+  const o = c.createOscillator();
+  const g = c.createGain();
+  o.frequency.value = 2100;
+  o.connect(g); g.connect(c.destination);
+  g.gain.setValueAtTime(0.07, t);
+  g.gain.setValueAtTime(-0.07, t + 0.45);
+  g.gain.setValueAtTime(0.07, t + 0.9);
+  o.start(t); o.stop(t + 1.15);
+}
+function playHandshake(number, busy) {
+  try {
+    const c = ctx();
+    const t0 = c.currentTime + 0.05;
+    const dtmf = {1:[697,1209],2:[697,1336],3:[697,1477],4:[770,1209],5:[770,1336],6:[770,1477],7:[852,1209],8:[852,1336],9:[852,1477],0:[941,1336]};
+    tone(350, t0, 0.7, "sine", 0.045);
+    tone(440, t0, 0.7, "sine", 0.04);
+    let at = t0 + 0.85;
+    String(number || "17035550142").split("").forEach(d => {
+      if (d === ",") { at += 0.35; return; }
+      const p = dtmf[d];
+      if (!p) return;
+      tone(p[0], at, 0.09, "sine", 0.06);
+      tone(p[1], at, 0.09, "sine", 0.06);
+      at += 0.16;
+    });
+    if (busy) {
+      for (let i = 0; i < 6; i++) {
+        tone(480, at + i * 0.5, 0.22, "sine", 0.07);
+        tone(620, at + i * 0.5, 0.22, "sine", 0.06);
+      }
+      return;
+    }
+    tone(440, at, 1.1, "sine", 0.045);
+    tone(480, at, 1.1, "sine", 0.04);
+    at += 1.35;
+    answerTone(at);
+    at += 1.2;
+    noise(at, 0.35, 0.14, 1200);
+    sweep(at + 0.15, 800, 2400, 0.4, "square", 0.025);
+    noise(at + 0.5, 0.4, 0.12, 2200);
+    sweep(at + 0.7, 3000, 600, 0.45, "sawtooth", 0.03);
+    noise(at + 1.15, 0.55, 0.1, 1500);
+    tone(1800, at + 1.3, 0.25, "square", 0.03);
+    tone(1200, at + 1.7, 0.3, "triangle", 0.03);
+    noise(at + 2.0, 0.35, 0.08, 900);
+    tone(2100, at + 2.3, 0.2, "sine", 0.03);
+  } catch (e) {}
+}
+function stopAudio() { try { if (state.audio) { state.audio.close(); state.audio = null; } } catch (e) {} }
+function chime() {
+  try {
+    const c = ctx(); const t = c.currentTime;
+    tone(880, t, 0.09, "sine", 0.06);
+    tone(1175, t + 0.1, 0.16, "sine", 0.055);
+  } catch (e) {}
+}
+function door() {
+  try {
+    const c = ctx(); const t = c.currentTime;
+    noise(t, 0.18, 0.05, 400);
+    tone(220, t, 0.12, "triangle", 0.04);
+    tone(330, t + 0.08, 0.14, "sine", 0.04);
+    tone(494, t + 0.16, 0.12, "sine", 0.035);
+  } catch (e) {}
+}
+function hangup() {
+  try {
+    const c = ctx(); const t = c.currentTime;
+    noise(t, 0.12, 0.12, 800);
+    tone(320, t, 0.08, "square", 0.04);
+    tone(180, t + 0.07, 0.1, "sawtooth", 0.03);
+  } catch (e) {}
+}
+function speak(text) {
+  try {
+    if (!$("speaker").checked || !window.speechSynthesis) return;
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 0.92;
+    u.pitch = 0.8;
+    const voices = speechSynthesis.getVoices();
+    const male = voices.find(v => /male|david|daniel|alex/i.test(v.name));
+    if (male) u.voice = male;
+    speechSynthesis.speak(u);
+  } catch (e) {}
+}
+
+window.runSelfTest = async function() {
+  const log = [];
+  const ok = (name, cond) => { log.push((cond ? "PASS" : "FAIL") + "  " + name); return cond; };
+  ok("logo svg", !!document.querySelector("#deskLogo svg"));
+  ok("sign-on fields", !!$("screenName") && !!$("password") && !!$("signOnBtn"));
+  $("screenName").value = "SelfTest";
+  $("speaker").checked = false;
+  $("location").value = "home";
+  openApp();
+  ok("app opens", !$("app").classList.contains("hidden"));
+  startDial();
+  await wait(8000);
+  ok("reached online", state.online === true);
+  ok("welcome window", !!$("workspace").querySelector(".win"));
+  ok("mail seeded", mail.length >= 3);
+  goKeyword("news");
+  ok("news channel", [...$("workspace").querySelectorAll(".wtitle")].some(n => n.textContent.indexOf("News") >= 0));
+  goKeyword("chat");
+  ok("people connection", [...$("workspace").querySelectorAll(".wtitle")].some(n => n.textContent.indexOf("People") >= 0));
+  openMail();
+  ok("mailbox", [...$("workspace").querySelectorAll(".wtitle")].some(n => n.textContent.indexOf("Mailbox") >= 0));
+  const out = log.join("\n") + "\n" + (log.every(l => l.startsWith("PASS")) ? "SELF-TEST OK" : "SELF-TEST FAILED");
+  const box = $("selftest");
+  box.textContent = out;
+  box.classList.remove("hidden");
+  return out;
+};
+
+if (location.search.indexOf("selftest=1") >= 0) {
+  window.addEventListener("load", () => setTimeout(() => window.runSelfTest(), 200));
+}
+</script>
+</body>
+</html>

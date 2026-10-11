@@ -1,0 +1,7 @@
+# Copy to host.cfg or let the first start write one.
+# Environment variables override these. Do not commit host.cfg.
+admin=choose-eight-or-more
+pay_sats=100000
+rpc=
+upstream=
+wallet=

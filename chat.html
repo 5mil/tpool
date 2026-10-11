@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thimble — People Connection</title>
+<style>
+  :root { --navy:#000080; --win:#d4d0c8; --lav:#c9c8ef; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; }
+  body { font-family:Tahoma, "MS Sans Serif", sans-serif; background:#008080; color:#142033; }
+  button, input, select { font-family:inherit; font-size:14px; }
+  button { cursor:pointer; }
+  .hidden { display:none !important; }
+  #stage { min-height:100%; display:flex; align-items:center; justify-content:center; padding:16px; }
+  .card, #app { width:min(980px, 100%); background:#f7f5ef; border:3px solid #16356b; box-shadow:2px 2px 0 #000; }
+  .brand { display:flex; align-items:center; justify-content:center; gap:12px; padding:18px 12px 6px; }
+  .am { letter-spacing:3px; font-size:13px; font-weight:700; color:#16356b; }
+  .on { font-family:Georgia, serif; font-style:italic; font-size:36px; color:#16356b; line-height:.9; }
+  .form { padding:8px 36px 16px; }
+  label { display:block; margin:8px 0 4px; font-size:13px; }
+  input, select { width:100%; border:1px solid #7d8794; padding:6px 8px; background:#fff; }
+  .row { display:flex; justify-content:flex-end; gap:8px; padding:0 36px 16px; }
+  .btn { min-width:88px; height:28px; background:var(--win); border:2px solid; border-color:#fff #404040 #404040 #fff; }
+  .btn.primary { font-weight:700; }
+  .fine { text-align:center; font-size:11px; color:#555; padding-bottom:12px; }
+  #app { background:var(--win); display:flex; flex-direction:column; height:min(720px, calc(100vh - 24px)); }
+  #title { height:24px; background:linear-gradient(90deg,#000080,#1084d0); color:#fff; display:flex; align-items:center; padding:0 8px; font-weight:700; font-size:13px; }
+  #menu { display:flex; gap:10px; padding:4px 8px; background:var(--win); font-size:13px; }
+  #menu span { cursor:pointer; padding:2px 6px; }
+  #menu span:hover { background:#000080; color:#fff; }
+  #body { flex:1; display:flex; min-height:0; background:#fff; }
+  #rooms, #members { width:180px; background:#f4f7fb; padding:8px; overflow:auto; font-size:13px; }
+  #rooms { border-right:1px solid #c5c5c5; }
+  #members { border-left:1px solid #c5c5c5; }
+  .room, .who { padding:6px; cursor:pointer; border:1px solid transparent; }
+  .room.on, .room:hover { background:#000080; color:#fff; }
+  #center { flex:1; display:flex; flex-direction:column; min-width:0; }
+  #log { flex:1; overflow:auto; padding:8px; font-size:13px; font-family:Verdana, sans-serif; background:#fff; }
+  .me { color:#003399; }
+  .sys { color:#666; font-style:italic; }
+  .host { color:#6a2a2a; }
+  #composer { display:flex; gap:6px; padding:8px; background:var(--win); border-top:1px solid #fff; }
+  #composer input { flex:1; }
+  #status { height:22px; background:var(--win); border-top:1px solid #808080; font-size:11px; display:flex; align-items:center; padding:0 8px; gap:10px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <section class="card" id="signon">
+    <div class="brand">
+      <svg width="64" height="54" viewBox="0 0 74 62" aria-hidden="true"><polygon points="37,2 72,60 2,60" fill="#16356b"/><circle cx="37" cy="36" r="14" fill="#f7f4ea"/><g transform="translate(20,22)" fill="#f0c419" stroke="#16356b" stroke-width="1.2"><circle cx="10" cy="5" r="3.1"/><path d="M8 9 L14 12 L20 9 L16 16 L22 22 L14 18 L10 26 L9 17 L2 18 Z"/></g></svg>
+      <div><div class="on">thimble</div></div>
+    </div>
+    <div class="form">
+      <label>Select Screen Name</label>
+      <input id="screenName" maxlength="16" value="SteveCaseFan" autocomplete="off">
+      <label>Enter a room</label>
+      <select id="roomPick">
+        <option>Lobby</option>
+        <option>Thirtysomething</option>
+        <option>Computer Help</option>
+        <option>Sports Bar</option>
+        <option>New Member Lounge</option>
+      </select>
+      <p class="fine" style="text-align:left">People Connection. Messages go to everyone in the same room, through a public relay. Do not type a real password.</p>
+    </div>
+    <div class="row"><button class="btn primary" id="enter">Sign On</button></div>
+  </section>
+
+  <section id="app" class="hidden">
+    <div id="title">Thimble — People Connection</div>
+    <div id="menu"><span id="signOff">Sign Off</span><span id="whoami"></span></div>
+    <div id="body">
+      <aside id="rooms"></aside>
+      <div id="center">
+        <div id="log"></div>
+        <form id="composer"><input id="cin" placeholder="Talk in the room" autocomplete="off"><button class="btn primary" type="submit">Send</button></form>
+      </div>
+      <aside id="members"><b>In this room</b><div id="whoList"></div></aside>
+    </div>
+    <div id="status"><span id="stRoom">Offline</span><span id="stLink">connecting…</span><span style="margin-left:auto">Live room</span></div>
+  </section>
+</div>
+<script>
+const ROOMS = ["Lobby", "Thirtysomething", "Computer Help", "Sports Bar", "New Member Lounge"];
+const me = { name: "", id: Math.random().toString(36).slice(2, 10), room: "Lobby" };
+const seen = new Set();
+const present = new Map();
+let source = null;
+
+const $ = (id) => document.getElementById(id);
+function topic(room) { return "thimble-" + room.toLowerCase().replace(/[^a-z0-9]+/g, "-"); }
+function add(cls, text) {
+  const d = document.createElement("div");
+  d.className = cls;
+  d.textContent = text;
+  $("log").appendChild(d);
+  $("log").scrollTop = $("log").scrollHeight;
+}
+function paintRooms() {
+  $("rooms").innerHTML = "<b>Rooms</b>" + ROOMS.map(r => `<div class="room${r===me.room?" on":""}" data-room="${r}">${r}</div>`).join("");
+}
+function paintWho() {
+  const now = Date.now();
+  let html = "";
+  present.forEach((t, name) => { if (now - t < 120000) html += `<div class="who">● ${name}</div>`; });
+  $("whoList").innerHTML = html || "<div class=\"sys\">just you, for a moment</div>";
+}
+async function publish(payload) {
+  await fetch("https://ntfy.sh/" + topic(me.room), {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+function handle(raw) {
+  let msg;
+  try { msg = JSON.parse(raw); } catch (e) { return; }
+  if (!msg || !msg.id || seen.has(msg.id)) return;
+  seen.add(msg.id);
+  if (msg.kind === "join") {
+    present.set(msg.name, Date.now());
+    if (msg.id !== me.id) add("sys", msg.name + " has entered the room.");
+  } else if (msg.kind === "leave") {
+    present.delete(msg.name);
+    add("sys", msg.name + " has left the room.");
+  } else if (msg.kind === "chat") {
+    present.set(msg.name, Date.now());
+    add(msg.name === me.name ? "me" : "", msg.name + ":  " + msg.text);
+  } else if (msg.kind === "here") {
+    present.set(msg.name, Date.now());
+  }
+  paintWho();
+}
+function connect(room) {
+  if (source) { source.close(); source = null; }
+  me.room = room;
+  $("stRoom").textContent = room;
+  $("stLink").textContent = "listening";
+  $("log").innerHTML = "";
+  add("sys", "You have entered " + room + " as " + me.name + ".");
+  add("sys", "Anyone on this page in the same room can answer.");
+  paintRooms();
+  present.set(me.name, Date.now());
+  paintWho();
+  source = new EventSource("https://ntfy.sh/" + topic(room) + "/sse");
+  source.onmessage = (ev) => {
+    try { handle(JSON.parse(ev.data).message); } catch (e) {}
+  };
+  source.onerror = () => { $("stLink").textContent = "reconnecting"; };
+  publish({ kind:"join", name:me.name, id:me.id });
+}
+function enter() {
+  const name = $("screenName").value.trim();
+  if (name.length < 3 || name.length > 16 || /\s/.test(name)) { alert("Screen names are 3 to 16 characters, no spaces."); return; }
+  me.name = name;
+  $("signon").classList.add("hidden");
+  $("app").classList.remove("hidden");
+  $("whoami").textContent = name;
+  connect($("roomPick").value);
+}
+async function send(text) {
+  const clean = text.replace(/\s+/g, " ").trim().slice(0, 240);
+  if (!clean) return;
+  await publish({ kind:"chat", name:me.name, text:clean, id:Math.random().toString(36).slice(2, 12) });
+}
+$("enter").onclick = enter;
+$("screenName").onkeydown = (e) => { if (e.key === "Enter") enter(); };
+$("composer").onsubmit = (e) => { e.preventDefault(); const t = $("cin").value; $("cin").value = ""; send(t); };
+$("rooms").onclick = (e) => {
+  const room = e.target.getAttribute("data-room");
+  if (!room || room === me.room) return;
+  publish({ kind:"leave", name:me.name, id:Math.random().toString(36).slice(2) });
+  connect(room);
+};
+$("signOff").onclick = () => {
+  publish({ kind:"leave", name:me.name, id:Math.random().toString(36).slice(2) });
+  if (source) source.close();
+  location.reload();
+};
+paintRooms();
+setInterval(() => { if (me.name) publish({ kind:"here", name:me.name, id:Math.random().toString(36).slice(2) }); }, 25000);
+</script>
+</body>
+</html>
