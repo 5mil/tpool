@@ -26,13 +26,18 @@ It is **not yet** safe to hand to strangers with ASICs or expect reliable mainne
 End-to-end path verified on Bitcoin regtest: node up → module on → template live → port 3333 open → miners connect and find blocks.  
 Windows official-zip path already present in `server_ui.zig` for Bitcoin / Litecoin / Dogecoin.
 
-### 3. Member-facing party dashboard
+### 3. Member-facing party dashboard  ✅
 - Minimal read-only view of:
   - accepted shares
   - immature balance
   - paid amounts
   - txids
 - Make the ledger transparent so members can trust it without asking the operator.
+
+**Status 2026-10-12:**  
+`/party` (and `/party.html`) serves a read-only dashboard.  
+`/api/pool` now includes per-worker `balance` and a `payouts` array (from `payouts.log`: ts, address, amount, txid).  
+Members can open `http://HOST:8080/party` with no login and see shares, immature, balance, and recent paid txids.
 
 ### 4. Concurrent modules + non-regtest payout
 - Two live ports + two templates running simultaneously.
