@@ -943,12 +943,10 @@ fn spawnNode(port: u16, algo: []const u8, name: []const u8, bin: []const u8) voi
     node_argv[index][1] = node_arg[index][1][0..node_len[index][1]];
     node_argv[index][2] = node_arg[index][2][0..node_len[index][2]];
     var err_path: [260]u8 = undefined;
-    const err_s = std.fmt.bufPrint(&err_path, "{s}/node.err", .{data_s}) catch return;
-    const err_file = std.Io.Dir.cwd().createFile(compat.io, err_s, .{}) catch null;
+    const err_s = std.fmt.bufPrint(&err_path, "{s}/debug.log", .{data_s}) catch return;
     var child = compat.Child.init(node_argv[index][0..3], std.heap.page_allocator);
     child.stdout_behavior = .Ignore;
     child.stderr_behavior = .Ignore;
-    if (err_file) |f| child.stderr_file = f;
     child.create_no_window = true;
     child.spawn() catch {
         setStage("failed", "the node binary would not start");
@@ -973,7 +971,7 @@ fn spawnNode(port: u16, algo: []const u8, name: []const u8, bin: []const u8) voi
         const detail = fileTail(err_s, &why);
         const debug_path = std.fmt.bufPrint(&err_path, "{s}/debug.log", .{data_s}) catch err_s;
         const debug = if (detail.len == 0) fileTail(debug_path, &why) else detail;
-        setStage("failed", if (debug.len > 0) debug else "node did not answer rpc. see coin-data node.err");
+        setStage("failed", if (debug.len > 0) debug else "node did not answer rpc. see coin-data debug.log");
         return;
     }
     setStage("syncing", "node started. miners can connect. work starts when a template exists");

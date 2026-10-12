@@ -383,14 +383,13 @@ fn toolAt(path: []const u8) bool {
 fn grab(url: []const u8, zip_rel: []const u8, into: []const u8) bool {
     compat.fs.cwd().makePath("tools") catch return false;
     compat.fs.cwd().makePath(into) catch return false;
-    const logf = std.Io.Dir.cwd().createFile(compat.io, "tools/fetch.err", .{}) catch null;
     const curls = [_][]const u8{ "C:\\Windows\\System32\\curl.exe", "curl.exe", "curl" };
     var got = false;
     for (curls) |curl| {
         var proc = compat.Child.init(&.{ curl, "-L", "--fail", "--retry", "3", "-o", zip_rel, url }, std.heap.page_allocator);
         proc.stdout_behavior = .Ignore;
         proc.stderr_behavior = .Ignore;
-        if (logf) |f| proc.stderr_file = f;
+        proc.create_no_window = true;
         const term = proc.spawnAndWait() catch continue;
         if (term == .Exited and term.Exited == 0) {
             got = true;
@@ -593,26 +592,56 @@ fn connectAfter(port: u16, algo: []const u8, name: []const u8, dest: []const u8)
     chain.launchBuilt(port, algo, name, dest);
 }
 
+var cf_exe: [260]u8 = @splat(0);
+var cf_args = [_][]const u8{
+    "",
+    "tunnel",
+    "--url",
+    "http://127.0.0.1:8080",
+    "--no-autoupdate",
+    "--protocol",
+    "http2",
+    "--logfile",
+    "tools/tunnel.log",
+};
+
+fn realExe(path: []const u8) bool {
+    if (!toolAt(path)) return false;
+    const file = compat.fs.cwd().openFile(path, .{}) catch return false;
+    defer file.close();
+    var mag: [2]u8 = undefined;
+    const n = file.read(&mag) catch return false;
+    return n == 2 and mag[0] == 'M' and mag[1] == 'Z';
+}
+
 fn cloudflaredPath() []const u8 {
-    if (toolAt("tools/cloudflared.exe")) return "tools\\cloudflared.exe";
+    if (realExe("tools/cloudflared.exe")) return "tools\\cloudflared.exe";
     return "cloudflared";
 }
 
 fn ensureCloudflared() bool {
-    if (toolAt("tools/cloudflared.exe") or which("cloudflared")) return true;
-    setText(tunnel_line, "Downloading cloudflared. About 20 MB, no account.");
+    if (realExe("tools/cloudflared.exe")) return true;
+    if (which("cloudflared") and !toolAt("tools/cloudflared.exe")) return true;
+    setText(tunnel_line, "Downloading cloudflared. About 40 MB, no account.");
     compat.fs.cwd().makePath("tools") catch return false;
     const url = "https://github.com/cloudflare/cloudflared/releases/download/2026.10.0/cloudflared-windows-amd64.exe";
-    const curls = [_][]const u8{ "curl.exe", "curl" };
+    const curls = [_][]const u8{ "C:\\Windows\\System32\\curl.exe", "curl.exe", "curl" };
     for (curls) |curl| {
-        var proc = compat.Child.init(&.{ curl, "-L", "--fail", "--retry", "2", "-o", "tools/cloudflared.exe", url }, std.heap.page_allocator);
+        var proc = compat.Child.init(&.{ curl, "-L", "--fail", "--retry", "3", "-o", "tools/cloudflared.exe", url }, std.heap.page_allocator);
         proc.stdout_behavior = .Ignore;
         proc.stderr_behavior = .Ignore;
         proc.create_no_window = true;
         const term = proc.spawnAndWait() catch continue;
-        if (term == .Exited and term.Exited == 0 and toolAt("tools/cloudflared.exe")) return true;
+        if (term == .Exited and term.Exited == 0 and realExe("tools/cloudflared.exe")) return true;
     }
-    return false;
+    var ps_buf: [460]u8 = undefined;
+    const ps = std.fmt.bufPrint(&ps_buf, "Invoke-WebRequest -UseBasicParsing -Uri '{s}' -OutFile 'tools/cloudflared.exe'", .{url}) catch return false;
+    var proc = compat.Child.init(&.{ "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps }, std.heap.page_allocator);
+    proc.stdout_behavior = .Ignore;
+    proc.stderr_behavior = .Ignore;
+    proc.create_no_window = true;
+    const term = proc.spawnAndWait() catch return false;
+    return term == .Exited and term.Exited == 0 and realExe("tools/cloudflared.exe");
 }
 
 fn tunnelUrl(text: []const u8, out: []u8) ?usize {
@@ -620,7 +649,7 @@ fn tunnelUrl(text: []const u8, out: []u8) ?usize {
     while (i + 8 < text.len) : (i += 1) {
         if (!std.mem.startsWith(u8, text[i..], "https://")) continue;
         var end = i;
-        while (end < text.len and text[end] != ' ' and text[end] != '\n' and text[end] != '\r' and text[end] != '|') end += 1;
+        while (end < text.len and text[end] != ' ' and text[end] != '\n' and text[end] != '\r' and text[end] != '|' and text[end] != '"') end += 1;
         const url = text[i..end];
         if (std.mem.indexOf(u8, url, ".trycloudflare.com") == null) continue;
         const n = @min(out.len - 1, url.len);
@@ -638,25 +667,25 @@ fn tunnelWorker() void {
     }
     compat.fs.cwd().makePath("tools") catch {};
     if (!ensureCloudflared()) {
-        setText(tunnel_line, "Could not download cloudflared. Opening the mining port anyway.");
+        setText(tunnel_line, "Could not download cloudflared. It has to be the real program, not an error page. Opening the mining port anyway.");
     } else {
         {
             var blank = compat.fs.cwd().createFile("tools/tunnel.log", .{}) catch return;
             blank.close();
         }
-        const logf = std.Io.Dir.cwd().createFile(compat.io, "tools/tunnel.err", .{}) catch null;
         const cf = cloudflaredPath();
-        const cf_argv = [_][]const u8{ cf, "tunnel", "--url", "http://127.0.0.1:8080", "--no-autoupdate", "--protocol", "http2", "--logfile", "tools/tunnel.log" };
+        const n = @min(cf.len, cf_exe.len);
+        @memcpy(cf_exe[0..n], cf[0..n]);
+        cf_args[0] = cf_exe[0..n];
         setText(tunnel_line, "Opening the sign-on page and the mining port.");
-        tunnel_child = compat.Child.init(&cf_argv, std.heap.page_allocator);
+        tunnel_child = compat.Child.init(&cf_args, std.heap.page_allocator);
         tunnel_child.stdout_behavior = .Ignore;
         tunnel_child.stderr_behavior = .Ignore;
-        if (logf) |f| tunnel_child.stderr_file = f;
         tunnel_child.create_no_window = true;
         if (tunnel_child.spawn()) |_| {
             tunnel_live = true;
         } else |_| {
-            setText(tunnel_line, "cloudflared would not start. Opening the mining port anyway.");
+            setText(tunnel_line, "cloudflared would not start. tools\\cloudflared.exe has to be the real program. Opening the mining port anyway.");
         }
     }
     startMineRelay();
