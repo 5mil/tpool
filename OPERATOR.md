@@ -129,6 +129,9 @@ Internal worker:
 # or look at party.db / the doctor “recent shares” section
 ```
 
+**Member dashboard (read-only):** open `http://HOST:8080/party`  
+Shows workers (shares, hashrate, immature, balance) and recent payouts with txids. No login required. Data comes from `/api/pool`.
+
 Accepted shares move into the party ledger.  
 After 100 confirmations the credit becomes mature and can be paid via `sendtoaddress` once the balance exceeds the threshold in host.cfg.
 
