@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tpool – Party Dashboard</title>
+<style>
+  :root { --bg:#1a2420; --card:#24302b; --ink:#d7d2c8; --muted:#8a9a90; --accent:#7cb87c; --warn:#c9a227; --line:#3a4a42; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: Georgia, "Times New Roman", serif; background:var(--bg); color:var(--ink); line-height:1.45; }
+  header { padding:20px 24px 12px; border-bottom:1px solid var(--line); display:flex; flex-wrap:wrap; gap:12px; align-items:baseline; justify-content:space-between; }
+  header h1 { margin:0; font-size:22px; font-weight:normal; letter-spacing:0.02em; }
+  header .sub { color:var(--muted); font-size:14px; }
+  header a { color:var(--accent); }
+  main { max-width:1100px; margin:0 auto; padding:20px 16px 48px; }
+  .row { display:flex; flex-wrap:wrap; gap:14px; margin-bottom:18px; }
+  .stat { background:var(--card); border:1px solid var(--line); border-radius:6px; padding:14px 18px; min-width:140px; flex:1; }
+  .stat .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:0.06em; }
+  .stat .value { font-size:22px; margin-top:4px; }
+  h2 { font-size:16px; font-weight:normal; color:var(--muted); margin:28px 0 10px; text-transform:uppercase; letter-spacing:0.06em; }
+  table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); border-radius:6px; overflow:hidden; font-size:14px; }
+  th, td { padding:10px 12px; text-align:left; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:normal; font-size:12px; text-transform:uppercase; letter-spacing:0.04em; }
+  tr:last-child td { border-bottom:none; }
+  .mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size:12px; word-break:break-all; }
+  .empty { color:var(--muted); padding:18px; text-align:center; }
+  .err { color:#c07070; padding:12px; }
+  .online { color:var(--accent); }
+  footer { margin-top:32px; color:var(--muted); font-size:12px; text-align:center; }
+  button.refresh { background:transparent; border:1px solid var(--line); color:var(--ink); padding:6px 12px; border-radius:4px; cursor:pointer; font-family:inherit; }
+  button.refresh:hover { border-color:var(--accent); color:var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Party Dashboard</h1>
+    <div class="sub">Read-only ledger · shares · immature · paid · txids</div>
+  </div>
+  <div>
+    <button class="refresh" id="refresh">Refresh</button>
+    <a href="/">Sign-on</a>
+  </div>
+</header>
+<main>
+  <div id="err" class="err" hidden></div>
+  <div class="row" id="stats">
+    <div class="stat"><div class="label">Accepted</div><div class="value" id="accepted">—</div></div>
+    <div class="stat"><div class="label">Rejected</div><div class="value" id="rejected">—</div></div>
+    <div class="stat"><div class="label">Workers</div><div class="value" id="nworkers">—</div></div>
+    <div class="stat"><div class="label">Coin</div><div class="value" id="coin">—</div></div>
+  </div>
+
+  <h2>Workers</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Worker</th>
+        <th>Party</th>
+        <th>Shares</th>
+        <th>Hashrate</th>
+        <th>Immature</th>
+        <th>Balance</th>
+        <th>Algo</th>
+      </tr>
+    </thead>
+    <tbody id="workers">
+      <tr><td colspan="7" class="empty">Loading…</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Recent payouts</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>When</th>
+        <th>Address</th>
+        <th>Amount (sats)</th>
+        <th>Txid</th>
+      </tr>
+    </thead>
+    <tbody id="payouts">
+      <tr><td colspan="4" class="empty">Loading…</td></tr>
+    </tbody>
+  </table>
+
+  <footer>
+    Data from <code>/api/pool</code>. Balances move immature → mature after 100 confirmations, then pay when above the host threshold.
+  </footer>
+</main>
+<script>
+function fmtHash(h) {
+  if (h == null || h === 0) return "—";
+  if (h >= 1e12) return (h/1e12).toFixed(2) + " TH/s";
+  if (h >= 1e9) return (h/1e9).toFixed(2) + " GH/s";
+  if (h >= 1e6) return (h/1e6).toFixed(2) + " MH/s";
+  if (h >= 1e3) return (h/1e3).toFixed(1) + " kH/s";
+  return h + " H/s";
+}
+function fmtTs(ts) {
+  const n = Number(ts);
+  if (!n) return ts || "—";
+  try { return new Date(n * 1000).toLocaleString(); } catch { return String(ts); }
+}
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+async function load() {
+  const err = document.getElementById("err");
+  err.hidden = true;
+  try {
+    const res = await fetch("/api/pool");
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    document.getElementById("accepted").textContent = data.accepted ?? 0;
+    document.getElementById("rejected").textContent = data.rejected ?? 0;
+    document.getElementById("nworkers").textContent = (data.workers || []).length;
+    document.getElementById("coin").textContent = data.coin || "none";
+
+    const wb = document.getElementById("workers");
+    const workers = data.workers || [];
+    if (workers.length === 0) {
+      wb.innerHTML = '<tr><td colspan="7" class="empty">No workers yet. Connect a miner to appear here.</td></tr>';
+    } else {
+      wb.innerHTML = workers.map(w => `<tr>
+        <td class="mono">${esc(w.name)}</td>
+        <td>${esc(w.party)}</td>
+        <td>${esc(w.shares)}</td>
+        <td>${fmtHash(w.hashrate)}</td>
+        <td>${esc(w.immature ?? 0)}</td>
+        <td>${esc(w.balance ?? 0)}</td>
+        <td>${esc(w.algo)}</td>
+      </tr>`).join("");
+    }
+
+    const pb = document.getElementById("payouts");
+    const payouts = (data.payouts || []).slice().reverse(); // newest first
+    if (payouts.length === 0) {
+      pb.innerHTML = '<tr><td colspan="4" class="empty">No payouts recorded yet.</td></tr>';
+    } else {
+      pb.innerHTML = payouts.map(p => `<tr>
+        <td>${esc(fmtTs(p.ts))}</td>
+        <td class="mono">${esc(p.address)}</td>
+        <td>${esc(p.amount)}</td>
+        <td class="mono">${esc(p.txid)}</td>
+      </tr>`).join("");
+    }
+  } catch (e) {
+    err.hidden = false;
+    err.textContent = "Could not load /api/pool: " + e.message;
+  }
+}
+document.getElementById("refresh").onclick = load;
+load();
+setInterval(load, 15000);
+</script>
+</body>
+</html>
