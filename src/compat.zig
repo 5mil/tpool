@@ -341,10 +341,38 @@ pub const net = struct {
     }
 
     pub fn getAddressList(alloc: std.mem.Allocator, host: []const u8, port: u16) !AddressList {
-        const addr = Address.parseIp4(host, port) catch return error.UnknownHostName;
-        const addrs = try alloc.alloc(Address, 1);
-        addrs[0] = addr;
+        if (Address.parseIp4(host, port)) |addr| {
+            const addrs = try alloc.alloc(Address, 1);
+            addrs[0] = addr;
+            return .{ .addrs = addrs, .alloc = alloc };
+        } else |_| {}
+        const name = std.Io.net.HostName.init(host) catch return error.UnknownHostName;
+        var storage: [16]std.Io.net.HostName.LookupResult = undefined;
+        var q = std.Io.Queue(std.Io.net.HostName.LookupResult).init(&storage);
+        try name.lookup(io, &q, .{ .port = port });
+        var tmp: [8]Address = undefined;
+        var n: usize = 0;
+        while (n < tmp.len) {
+            const item = q.getOneUncancelable(io) catch break;
+            switch (item) {
+                .address => |a| {
+                    tmp[n] = .{ .inner = a };
+                    n += 1;
+                },
+                else => {},
+            }
+        }
+        if (n == 0) return error.UnknownHostName;
+        const addrs = try alloc.alloc(Address, n);
+        @memcpy(addrs, tmp[0..n]);
         return .{ .addrs = addrs, .alloc = alloc };
+    }
+
+    pub fn connectHost(host: []const u8, port: u16) !Stream {
+        const list = try getAddressList(std.heap.page_allocator, host, port);
+        defer list.deinit();
+        if (list.addrs.len == 0) return error.UnknownHostName;
+        return try tcpConnectToAddress(list.addrs[0]);
     }
 
     pub const AddressList = struct {
@@ -361,8 +389,12 @@ pub const Child = struct {
     stdout_behavior: Stdio = .Inherit,
     stderr_behavior: Stdio = .Inherit,
     stderr: ?File = null,
+    stdout: ?File = null,
     inner: ?std.process.Child = null,
     create_no_window: bool = false,
+
+    stderr_file: ?std.Io.File = null,
+    stdout_file: ?std.Io.File = null,
 
     pub const Stdio = enum { Inherit, Ignore, Pipe };
     pub const Term = union(enum) { Exited: u32 };
@@ -382,10 +414,11 @@ pub const Child = struct {
     pub fn spawn(self: *Child) !void {
         self.inner = try std.process.spawn(io, .{
             .argv = self.argv,
-            .stdout = stdio(self.stdout_behavior),
-            .stderr = stdio(self.stderr_behavior),
+            .stdout = if (self.stdout_file) |f| .{ .file = f } else stdio(self.stdout_behavior),
+            .stderr = if (self.stderr_file) |f| .{ .file = f } else stdio(self.stderr_behavior),
             .create_no_window = self.create_no_window,
         });
+        if (self.inner.?.stdout) |out_file| self.stdout = .{ .inner = out_file };
         if (self.inner.?.stderr) |err_file| self.stderr = .{ .inner = err_file };
     }
 

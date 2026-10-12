@@ -1,4 +1,5 @@
 const compat = @import("compat.zig");
+const relay = @import("relay.zig");
 const std = @import("std");
 const HWND = *opaque {};
 const HINSTANCE = *opaque {};
@@ -382,20 +383,30 @@ fn toolAt(path: []const u8) bool {
 fn grab(url: []const u8, zip_rel: []const u8, into: []const u8) bool {
     compat.fs.cwd().makePath("tools") catch return false;
     compat.fs.cwd().makePath(into) catch return false;
-    const curls = [_][]const u8{ "curl.exe", "curl" };
+    const logf = std.Io.Dir.cwd().createFile(compat.io, "tools/fetch.err", .{}) catch null;
+    const curls = [_][]const u8{ "C:\\Windows\\System32\\curl.exe", "curl.exe", "curl" };
     var got = false;
     for (curls) |curl| {
-        var proc = compat.Child.init(&.{ curl, "-L", "--fail", "--retry", "2", "-o", zip_rel, url }, std.heap.page_allocator);
+        var proc = compat.Child.init(&.{ curl, "-L", "--fail", "--retry", "3", "-o", zip_rel, url }, std.heap.page_allocator);
         proc.stdout_behavior = .Ignore;
         proc.stderr_behavior = .Ignore;
+        if (logf) |f| proc.stderr_file = f;
         const term = proc.spawnAndWait() catch continue;
         if (term == .Exited and term.Exited == 0) {
             got = true;
             break;
         }
     }
-    if (!got) return false;
-    const tars = [_][]const u8{ "tar.exe", "tar" };
+    if (!got) {
+        var ps_buf: [520]u8 = undefined;
+        const ps = std.fmt.bufPrint(&ps_buf, "Invoke-WebRequest -UseBasicParsing -Uri '{s}' -OutFile '{s}'", .{ url, zip_rel }) catch return false;
+        var proc = compat.Child.init(&.{ "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps }, std.heap.page_allocator);
+        proc.stdout_behavior = .Ignore;
+        proc.stderr_behavior = .Ignore;
+        const term = proc.spawnAndWait() catch return false;
+        if (!(term == .Exited and term.Exited == 0)) return false;
+    }
+    const tars = [_][]const u8{ "C:\\Windows\\System32\\tar.exe", "tar.exe", "tar" };
     for (tars) |tar| {
         var unpack = compat.Child.init(&.{ tar, "-xf", zip_rel, "-C", into }, std.heap.page_allocator);
         unpack.stdout_behavior = .Ignore;
@@ -403,7 +414,13 @@ fn grab(url: []const u8, zip_rel: []const u8, into: []const u8) bool {
         const term = unpack.spawnAndWait() catch continue;
         if (term == .Exited and term.Exited == 0) return true;
     }
-    return false;
+    var ps_buf: [520]u8 = undefined;
+    const ps = std.fmt.bufPrint(&ps_buf, "Expand-Archive -Force -LiteralPath '{s}' -DestinationPath '{s}'", .{ zip_rel, into }) catch return false;
+    var unpack = compat.Child.init(&.{ "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps }, std.heap.page_allocator);
+    unpack.stdout_behavior = .Ignore;
+    unpack.stderr_behavior = .Ignore;
+    const term = unpack.spawnAndWait() catch return false;
+    return term == .Exited and term.Exited == 0;
 }
 
 fn ensureGit() []const u8 {
@@ -435,22 +452,22 @@ fn canReach(host: []const u8) bool {
 
 const Official = struct { url: []const u8, zip: []const u8, into: []const u8, bin: []const u8, why: []const u8 };
 
-fn official(name: []const u8) ?Official {
-    if (std.mem.eql(u8, name, "Bitcoin")) return .{
+fn official(name: []const u8, repo: []const u8) ?Official {
+    if (std.mem.eql(u8, name, "Bitcoin") or std.mem.indexOf(u8, repo, "github.com/bitcoin/bitcoin") != null) return .{
         .url = "https://bitcoincore.org/bin/bitcoin-core-31.1/bitcoin-31.1-win64.zip",
         .zip = "tools/bitcoin.zip",
         .into = "coin-bin/Bitcoin",
         .bin = "coin-bin/Bitcoin/bitcoin-31.1/bin/bitcoind.exe",
         .why = "Bitcoin Core is not a bare make. Downloading the official node.",
     };
-    if (std.mem.eql(u8, name, "Litecoin")) return .{
+    if (std.mem.eql(u8, name, "Litecoin") or std.mem.indexOf(u8, repo, "litecoin-project/litecoin") != null) return .{
         .url = "https://download.litecoin.org/litecoin-0.21.5.8/win/litecoin-0.21.5.8-win64.zip",
         .zip = "tools/litecoin.zip",
         .into = "coin-bin/Litecoin",
         .bin = "coin-bin/Litecoin/litecoin-0.21.5.8/bin/litecoind.exe",
-        .why = "Litecoin is autotools. A bare make fails at once. Downloading the official node.",
+        .why = "Litecoin is not a Makefile. Downloading the official node instead of compiling.",
     };
-    if (std.mem.eql(u8, name, "Dogecoin")) return .{
+    if (std.mem.eql(u8, name, "Dogecoin") or std.mem.indexOf(u8, repo, "github.com/dogecoin/dogecoin") != null) return .{
         .url = "https://github.com/dogecoin/dogecoin/releases/download/v1.14.9/dogecoin-1.14.9-win64.zip",
         .zip = "tools/dogecoin.zip",
         .into = "coin-bin/Dogecoin",
@@ -463,10 +480,17 @@ fn official(name: []const u8) ?Official {
 fn fetchWorker(repo: [180]u8, len: usize, port: u16, algo: [16]u8, algo_len: usize, name: [32]u8, name_len: usize) void {
     const typed = repo[0..len];
     const chain = @import("chain.zig");
-    if (official(name[0..name_len])) |rel| {
+    if (official(name[0..name_len], typed)) |rel| {
         chain.setStage("downloading", rel.why);
+        if (toolAt(rel.bin)) {
+            chain.setStage("connecting", "official node is already on disk. starting it");
+            chain.launchBinary(port, algo[0..algo_len], name[0..name_len], rel.bin);
+            return;
+        }
         if (!grab(rel.url, rel.zip, rel.into) or !toolAt(rel.bin)) {
-            chain.setStage("failed", "could not download the official node. See tools/ and the network.");
+            var why: [140]u8 = undefined;
+            const detail = logTail("tools/fetch.err", &why);
+            chain.setStage("failed", if (detail.len > 0) detail else "could not download the official node. See tools/fetch.err.");
             return;
         }
         chain.setStage("connecting", "official node is on disk. starting it");
@@ -598,7 +622,7 @@ fn tunnelUrl(text: []const u8, out: []u8) ?usize {
         var end = i;
         while (end < text.len and text[end] != ' ' and text[end] != '\n' and text[end] != '\r' and text[end] != '|') end += 1;
         const url = text[i..end];
-        if (std.mem.indexOf(u8, url, "trycloudflare.com") == null) continue;
+        if (std.mem.indexOf(u8, url, ".trycloudflare.com") == null) continue;
         const n = @min(out.len - 1, url.len);
         @memcpy(out[0..n], url[0..n]);
         out[n] = 0;
@@ -620,12 +644,14 @@ fn tunnelWorker() void {
             var blank = compat.fs.cwd().createFile("tools/tunnel.log", .{}) catch return;
             blank.close();
         }
-        const shell = std.fmt.bufPrint(&tunnel_shell, "{s} tunnel --url http://127.0.0.1:8080 --no-autoupdate --protocol http2 > tools\\tunnel.log 2>&1", .{cloudflaredPath()}) catch return;
-        tunnel_cmd[2] = shell;
+        const logf = std.Io.Dir.cwd().createFile(compat.io, "tools/tunnel.err", .{}) catch null;
+        const cf = cloudflaredPath();
+        const cf_argv = [_][]const u8{ cf, "tunnel", "--url", "http://127.0.0.1:8080", "--no-autoupdate", "--protocol", "http2", "--logfile", "tools/tunnel.log" };
         setText(tunnel_line, "Opening the sign-on page and the mining port.");
-        tunnel_child = compat.Child.init(&tunnel_cmd, std.heap.page_allocator);
+        tunnel_child = compat.Child.init(&cf_argv, std.heap.page_allocator);
         tunnel_child.stdout_behavior = .Ignore;
         tunnel_child.stderr_behavior = .Ignore;
+        if (logf) |f| tunnel_child.stderr_file = f;
         tunnel_child.create_no_window = true;
         if (tunnel_child.spawn()) |_| {
             tunnel_live = true;
@@ -639,18 +665,22 @@ fn tunnelWorker() void {
     var tick: usize = 0;
     while (tick < 45 and tunnel_live) : (tick += 1) {
         compat.time.sleep(1 * std.time.ns_per_s);
-        const log = compat.fs.cwd().readFileAlloc(std.heap.page_allocator, "tools/tunnel.log", 1 << 16) catch continue;
-        defer std.heap.page_allocator.free(log);
-        if (tunnelUrl(log, &scratch)) |n| {
-            _ = SetWindowTextA(tunnel_box, scratch[0..n :0]);
-            setText(tunnel_line, "Sign-on is the https address. Miners outside use the mining address.");
-            return;
+        const paths = [_][]const u8{ "tools/tunnel.err", "tools/tunnel.log" };
+        for (paths) |path| {
+            const log = compat.fs.cwd().readFileAlloc(std.heap.page_allocator, path, 1 << 16) catch continue;
+            defer std.heap.page_allocator.free(log);
+            if (tunnelUrl(log, &scratch)) |n| {
+                _ = SetWindowTextA(tunnel_box, scratch[0..n :0]);
+                setText(tunnel_line, "Sign-on is the https address. Miners outside use the mining address.");
+                return;
+            }
         }
     }
     if (!tunnel_live) return;
     var why: [140]u8 = undefined;
-    const detail = logTail("tools/tunnel.log", &why);
-    setText(tunnel_line, if (detail.len > 0) detail else "Sign-on tunnel did not print an address. See tools/tunnel.log. The mining address is separate.");
+    const detail = logTail("tools/tunnel.err", &why);
+    const detail2 = if (detail.len > 0) detail else logTail("tools/tunnel.log", &why);
+    setText(tunnel_line, if (detail2.len > 0) detail2 else "Sign-on tunnel did not print an address. See tools/tunnel.err. The mining address is separate.");
 }
 
 fn openTunnel() void {
@@ -670,6 +700,8 @@ fn closeTunnel() void {
     stop_cf.stderr_behavior = .Ignore;
     stop_cf.create_no_window = true;
     _ = stop_cf.spawnAndWait() catch {};
+    relay.closeAll();
+    mine_live = false;
     _ = SetWindowTextA(tunnel_box, "");
     setText(tunnel_line, "Tunnel closed. The free address no longer works.");
 }
@@ -717,42 +749,19 @@ fn startMineRelay() void {
     const wrote = std.fmt.bufPrint(local[0..95], "stratum+tcp://127.0.0.1:{d}", .{port}) catch return;
     local[wrote.len] = 0;
     _ = SetWindowTextA(mine_box, local[0..wrote.len :0]);
-    if (!ensureBore()) {
-        setText(mine_line, "The mining relay did not download. Miners on this PC use the address above.");
+    setText(mine_line, "Publishing the plain pool port. Miners outside this network use the address it prints.");
+    const opened = relay.publish(port, "bore.pub");
+    if (!opened.ok) {
+        setText(mine_line, opened.text());
         return;
     }
-    const shell = std.fmt.bufPrint(&mine_shell, "{s} local {d} --to bore.pub > tools\\bore.log 2>&1", .{ borePath(), port }) catch return;
-    mine_argv[2] = shell;
-    {
-        var blank = compat.fs.cwd().createFile("tools/bore.log", .{}) catch return;
-        blank.close();
-    }
-    setText(mine_line, "Publishing the pool port. Miners outside this network use the address it prints.");
-    mine_child = compat.Child.init(&mine_argv, std.heap.page_allocator);
-    mine_child.stdout_behavior = .Ignore;
-    mine_child.stderr_behavior = .Ignore;
-    mine_child.create_no_window = true;
-    mine_child.spawn() catch {
-        setText(mine_line, "bore would not start. Miners on this PC use the address above.");
-        return;
-    };
     mine_live = true;
-    var scratch: [160]u8 = undefined;
-    var tick: usize = 0;
-    while (tick < 40 and mine_live) : (tick += 1) {
-        compat.time.sleep(500 * std.time.ns_per_ms);
-        const log = compat.fs.cwd().readFileAlloc(std.heap.page_allocator, "tools/bore.log", 1 << 16) catch continue;
-        defer std.heap.page_allocator.free(log);
-        if (mineAddress(log, &scratch)) |n| {
-            _ = SetWindowTextA(mine_box, scratch[0..n :0]);
-            setText(mine_line, "That mining address is outside this network. Point a miner at it.");
-            return;
-        }
-    }
-    if (!mine_live) return;
-    var why: [140]u8 = undefined;
-    const detail = logTail("tools/bore.log", &why);
-    setText(mine_line, if (detail.len > 0) detail else "The mining relay did not print an address. See tools/bore.log.");
+    var shown: [160]u8 = undefined;
+    const n = @min(opened.text().len, shown.len - 1);
+    @memcpy(shown[0..n], opened.text()[0..n]);
+    shown[n] = 0;
+    _ = SetWindowTextA(mine_box, shown[0..n :0]);
+    setText(mine_line, "That mining address is outside this network. Point a miner at it. stratum+tcp, not the https page.");
 }
 
 fn mineWorker() void {
@@ -774,12 +783,7 @@ fn closeMine() void {
         return;
     }
     mine_live = false;
-    mine_child.kill();
-    var stop_bore = compat.Child.init(&.{ "taskkill", "/F", "/IM", "bore.exe" }, std.heap.page_allocator);
-    stop_bore.stdout_behavior = .Ignore;
-    stop_bore.stderr_behavior = .Ignore;
-    stop_bore.create_no_window = true;
-    _ = stop_bore.spawnAndWait() catch {};
+    relay.closeAll();
     setText(mine_line, "Mining relay closed. The public port no longer works.");
 }
 

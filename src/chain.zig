@@ -161,6 +161,12 @@ pub fn ready(port: u16) bool {
     return s.job.ready;
 }
 
+pub fn armed(port: u16) bool {
+    const s = find(port) orelse return false;
+    if (s.rpc_len > 8 or s.upstream_len > 3) return true;
+    return ready(port);
+}
+
 fn put(dst: []u8, src: []const u8) usize {
     const n = @min(dst.len, src.len);
     @memcpy(dst[0..n], src[0..n]);
@@ -255,13 +261,8 @@ fn hostPort(text: []const u8, out_host: []u8, out_port: *u16) ?[]const u8 {
 }
 
 fn connectHost(alloc: std.mem.Allocator, host: []const u8, port: u16) ?compat.net.Stream {
-    const addr = compat.net.Address.parseIp4(host, port) catch blk: {
-        const list = compat.net.getAddressList(alloc, host, port) catch return null;
-        defer list.deinit();
-        if (list.addrs.len == 0) return null;
-        break :blk list.addrs[0];
-    };
-    return compat.net.tcpConnectToAddress(addr) catch null;
+    _ = alloc;
+    return compat.net.connectHost(host, port) catch null;
 }
 
 fn httpPost(alloc: std.mem.Allocator, url: []const u8, body: []const u8) ?[]u8 {
@@ -371,11 +372,27 @@ fn pollRpc(s: *Source, alloc: std.mem.Allocator) void {
 }
 
 fn fillTemplate(s: *Source, alloc: std.mem.Allocator) void {
-    const req = if (std.mem.eql(u8, s.algo[0..s.algo_len], "scrypt"))
-        "{\"jsonrpc\":\"1.0\",\"id\":\"t\",\"method\":\"getblocktemplate\",\"params\":[{\"rules\":[\"segwit\",\"mweb\"]}]}"
-    else
-        "{\"jsonrpc\":\"1.0\",\"id\":\"t\",\"method\":\"getblocktemplate\",\"params\":[{\"rules\":[\"segwit\"]}]}";
-    const raw_http = httpPost(alloc, s.rpc[0..s.rpc_len], req) orelse {
+    const bodies = [_][]const u8{
+        "{\"jsonrpc\":\"1.0\",\"id\":\"t\",\"method\":\"getblocktemplate\",\"params\":[{\"rules\":[\"segwit\",\"mweb\"]}]}",
+        "{\"jsonrpc\":\"1.0\",\"id\":\"t\",\"method\":\"getblocktemplate\",\"params\":[{\"rules\":[\"segwit\"]}]}",
+        "{\"jsonrpc\":\"1.0\",\"id\":\"t\",\"method\":\"getblocktemplate\",\"params\":[{}]}",
+    };
+    const doge = std.mem.eql(u8, s.name[0..s.name_len], "Dogecoin");
+    const scrypt = std.mem.eql(u8, s.algo[0..s.algo_len], "scrypt");
+    const order = if (doge) [_]u8{ 1, 2, 0 } else if (scrypt) [_]u8{ 0, 1, 2 } else [_]u8{ 1, 2, 0 };
+    var chosen: ?[]u8 = null;
+    for (order) |idx| {
+        const raw_http = httpPost(alloc, s.rpc[0..s.rpc_len], bodies[idx]) orelse continue;
+        const raw = bodyOf(raw_http);
+        var prev_try: [64]u8 = undefined;
+        if (std.mem.indexOf(u8, raw, "\"result\":null") != null or copyField(raw, "previousblockhash", &prev_try) != 64) {
+            alloc.free(raw_http);
+            continue;
+        }
+        chosen = raw_http;
+        break;
+    }
+    const raw_http = chosen orelse {
         s.lock.lock();
         note(s, "no template yet");
         s.job.ready = false;
@@ -384,13 +401,6 @@ fn fillTemplate(s: *Source, alloc: std.mem.Allocator) void {
     };
     defer alloc.free(raw_http);
     const raw = bodyOf(raw_http);
-    if (std.mem.indexOf(u8, raw, "\"result\":null") != null) {
-        s.lock.lock();
-        s.job.ready = false;
-        note(s, "node refused a template");
-        s.lock.unlock();
-        return;
-    }
     const height: u32 = @intCast(jsonU64(raw, "height") orelse 0);
     var prev_disp: [64]u8 = undefined;
     if (copyField(raw, "previousblockhash", &prev_disp) != 64) return;
@@ -932,9 +942,13 @@ fn spawnNode(port: u16, algo: []const u8, name: []const u8, bin: []const u8) voi
     node_argv[index][0] = node_arg[index][0][0..node_len[index][0]];
     node_argv[index][1] = node_arg[index][1][0..node_len[index][1]];
     node_argv[index][2] = node_arg[index][2][0..node_len[index][2]];
+    var err_path: [260]u8 = undefined;
+    const err_s = std.fmt.bufPrint(&err_path, "{s}/node.err", .{data_s}) catch return;
+    const err_file = std.Io.Dir.cwd().createFile(compat.io, err_s, .{}) catch null;
     var child = compat.Child.init(node_argv[index][0..3], std.heap.page_allocator);
     child.stdout_behavior = .Ignore;
     child.stderr_behavior = .Ignore;
+    if (err_file) |f| child.stderr_file = f;
     child.create_no_window = true;
     child.spawn() catch {
         setStage("failed", "the node binary would not start");
@@ -943,11 +957,44 @@ fn spawnNode(port: u16, algo: []const u8, name: []const u8, bin: []const u8) voi
     node_live[index] = true;
     setFeed(port, algo, url_keep[0..url_n]);
     s.wallet_len = walletFrom(port, &s.wallet);
-    setStage("syncing", "node started. the pool port opens when a template exists");
+    setStage("connecting", "node process started. waiting for rpc");
+    var up = false;
+    var tick: usize = 0;
+    while (tick < 20) : (tick += 1) {
+        compat.time.sleep(std.time.ns_per_s);
+        if (httpPost(std.heap.page_allocator, url_keep[0..url_n], "{\"jsonrpc\":\"1.0\",\"id\":\"w\",\"method\":\"getblockchaininfo\",\"params\":[]}")) |ping| {
+            std.heap.page_allocator.free(ping);
+            up = true;
+            break;
+        }
+    }
+    if (!up) {
+        var why: [160]u8 = undefined;
+        const detail = fileTail(err_s, &why);
+        const debug_path = std.fmt.bufPrint(&err_path, "{s}/debug.log", .{data_s}) catch err_s;
+        const debug = if (detail.len == 0) fileTail(debug_path, &why) else detail;
+        setStage("failed", if (debug.len > 0) debug else "node did not answer rpc. see coin-data node.err");
+        return;
+    }
+    setStage("syncing", "node started. miners can connect. work starts when a template exists");
     s.lock.lock();
     note(s, "node started, waiting for the chain");
     s.lock.unlock();
     ensureWallet(s, url_keep[0..url_n]);
+}
+
+fn fileTail(path: []const u8, out: []u8) []const u8 {
+    const raw = compat.fs.cwd().readFileAlloc(std.heap.page_allocator, path, 1 << 16) catch return "";
+    defer std.heap.page_allocator.free(raw);
+    var end = raw.len;
+    while (end > 0 and (raw[end - 1] == '\n' or raw[end - 1] == '\r' or raw[end - 1] == ' ')) end -= 1;
+    if (end == 0) return "";
+    var from = end;
+    while (from > 0 and raw[from - 1] != '\n' and raw[from - 1] != '\r') from -= 1;
+    const line = raw[from..end];
+    const n = @min(line.len, out.len);
+    @memcpy(out[0..n], line[0..n]);
+    return out[0..n];
 }
 
 fn ensureWallet(s: *Source, url: []const u8) void {

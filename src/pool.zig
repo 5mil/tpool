@@ -322,7 +322,39 @@ fn serveTls(conn: compat.net.Server.Connection, algo: []const u8, port: u16) voi
     conn.stream.close();
 }
 
+const Gate = struct {
+    mu: compat.Mutex = .{},
+    link: *Link,
+    port: u16,
+    stop: bool = false,
+    last_id: [32]u8 = @splat(0),
+    last_len: usize = 0,
+};
+
+fn pushJobs(gate: *Gate) void {
+    while (!gate.stop) {
+        compat.time.sleep(std.time.ns_per_s);
+        if (gate.stop) return;
+        if (!chain.ready(gate.port)) continue;
+        const job = chain.snapshot(gate.port);
+        if (job.id_len == 0) continue;
+        if (job.id_len == gate.last_len and std.mem.eql(u8, job.id[0..job.id_len], gate.last_id[0..gate.last_len])) continue;
+        gate.mu.lock();
+        const ok = writeNotify(gate.link, job);
+        gate.mu.unlock();
+        if (!ok) return;
+        gate.last_len = @min(job.id_len, gate.last_id.len);
+        @memcpy(gate.last_id[0..gate.last_len], job.id[0..gate.last_len]);
+    }
+}
+
 fn serveLink(link: *Link, algo: []const u8, port: u16) void {
+    var gate = Gate{ .link = link, .port = port };
+    const pusher = std.Thread.spawn(.{}, pushJobs, .{&gate}) catch null;
+    defer {
+        gate.stop = true;
+        if (pusher) |t| t.join();
+    }
     var buf: [2048]u8 = undefined;
     var worker: [80]u8 = undefined;
     var worker_len: usize = 0;
@@ -349,22 +381,34 @@ fn serveLink(link: *Link, algo: []const u8, port: u16) void {
             if (ua.len > 0) agent_len = @min(ua.len, agent.len);
             if (work.checkedAlgo(algo) == null) {
                 const msg = std.fmt.bufPrint(&reply, "{{\"id\":{s},\"result\":null,\"error\":[20,\"algorithm not checked yet\",null]}}\n", .{if (id.len == 0) "1" else id}) catch return;
-                _ = link.writeAll(msg) catch return;
-                continue;
-            }
-            if (!chain.ready(port)) {
-                const msg = std.fmt.bufPrint(&reply, "{{\"id\":{s},\"result\":null,\"error\":[20,\"pool has no template yet\",null]}}\n", .{if (id.len == 0) "1" else id}) catch return;
-                _ = link.writeAll(msg) catch return;
+                gate.mu.lock();
+                link.writeAll(msg) catch {
+                    gate.mu.unlock();
+                    return;
+                };
+                gate.mu.unlock();
                 continue;
             }
             const job = chain.snapshot(port);
             const en1 = job.en1[0..job.en1_len];
             const msg = std.fmt.bufPrint(&reply, "{{\"id\":{s},\"result\":[[[\"mining.notify\",\"ae\"],[\"mining.set_difficulty\",\"ae\"]],\"{s}\",4],\"error\":null}}\n", .{ if (id.len == 0) "1" else id, en1 }) catch return;
-            _ = link.writeAll(msg) catch return;
+            gate.mu.lock();
+            link.writeAll(msg) catch {
+                gate.mu.unlock();
+                return;
+            };
             var diff_msg: [80]u8 = undefined;
-            const dline = std.fmt.bufPrint(&diff_msg, "{{\"id\":null,\"method\":\"mining.set_difficulty\",\"params\":[{d}]}}\n", .{diff}) catch return;
-            _ = link.writeAll(dline) catch return;
-            if (!writeNotify(link, job)) return;
+            if (std.fmt.bufPrint(&diff_msg, "{{\"id\":null,\"method\":\"mining.set_difficulty\",\"params\":[{d}]}}\n", .{diff})) |dline| {
+                link.writeAll(dline) catch {
+                    gate.mu.unlock();
+                    return;
+                };
+            } else |_| {}
+            if (job.ready and writeNotify(link, job)) {
+                gate.last_len = @min(job.id_len, gate.last_id.len);
+                @memcpy(gate.last_id[0..gate.last_len], job.id[0..gate.last_len]);
+            }
+            gate.mu.unlock();
         } else if (std.mem.eql(u8, method, "mining.authorize")) {
             const who = firstQuoted(line);
             worker_len = @min(who.len, worker.len);
@@ -379,7 +423,12 @@ fn serveLink(link: *Link, algo: []const u8, port: u16) void {
             if (party.enter(ident.name, ident.secret) == .denied) {
                 pool.lock.unlock();
                 const denied = std.fmt.bufPrint(&reply, "{{\"id\":{s},\"result\":false,\"error\":[24,\"party password\",null]}}\n", .{if (id.len == 0) "2" else id}) catch return;
-                _ = link.writeAll(denied) catch return;
+                gate.mu.lock();
+                link.writeAll(denied) catch {
+                    gate.mu.unlock();
+                    return;
+                };
+                gate.mu.unlock();
                 continue;
             }
             authorized = worker_len > 0;
@@ -400,18 +449,33 @@ fn serveLink(link: *Link, algo: []const u8, port: u16) void {
             }) catch {};
             pool.lock.unlock();
             const msg = std.fmt.bufPrint(&reply, "{{\"id\":{s},\"result\":true,\"error\":null}}\n", .{if (id.len == 0) "2" else id}) catch return;
-            _ = link.writeAll(msg) catch return;
+            gate.mu.lock();
+            link.writeAll(msg) catch {
+                gate.mu.unlock();
+                return;
+            };
+            gate.mu.unlock();
         } else if (std.mem.eql(u8, method, "mining.submit") and authorized) {
             const verdict = takeSubmit(line, algo, port, worker[0..worker_len], diff);
             if (verdict.ok and verdict.changed) {
                 diff = verdict.diff;
                 var diff_msg: [96]u8 = undefined;
                 if (std.fmt.bufPrint(&diff_msg, "{{\"id\":null,\"method\":\"mining.set_difficulty\",\"params\":[{d}]}}\n", .{diff})) |dline| {
-                    _ = link.writeAll(dline) catch {};
+                    gate.mu.lock();
+                    link.writeAll(dline) catch {
+                        gate.mu.unlock();
+                        return;
+                    };
+                    gate.mu.unlock();
                 } else |_| {}
             }
             const msg = std.fmt.bufPrint(&reply, "{{\"id\":{s},\"result\":{s},\"error\":{s}}}\n", .{ if (id.len == 0) "3" else id, if (verdict.ok) "true" else "false", verdict.err }) catch return;
-            _ = link.writeAll(msg) catch return;
+            gate.mu.lock();
+            link.writeAll(msg) catch {
+                gate.mu.unlock();
+                return;
+            };
+            gate.mu.unlock();
         } else if (method.len == 0 and std.mem.indexOf(u8, line, "\"method\":\"login\"") != null) {
             const msg = std.fmt.bufPrint(&reply, "{{\"id\":1,\"result\":null,\"error\":[20,\"algorithm not checked yet\",null]}}\n", .{}) catch return;
             _ = link.writeAll(msg) catch return;
@@ -867,7 +931,7 @@ fn watchPorts() void {
     while (true) {
         for (ports, algos, 0..) |port, algo, i| {
             if (port_claimed[i]) continue;
-            if (!chain.ready(port)) continue;
+            if (!chain.armed(port)) continue;
             port_claimed[i] = true;
             const thread = std.Thread.spawn(.{}, listen, .{ port, algo, i }) catch {
                 port_claimed[i] = false;
