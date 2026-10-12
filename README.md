@@ -388,7 +388,7 @@ On the host machine, tunnel 8080 (and the pool port if they will mine):
 cloudflared tunnel --url http://127.0.0.1:8080
 ```
 
-On Windows that button is in Thimble - Settings: Open free tunnel. It publishes the sign-on page on HTTPS and the plain stratum port as `stratum+tcp://bore.pub:PORT`. The mining relay is inside the host, so it does not need a separate bore.exe or the Visual C++ runtime. Publish mining port does the pool port on its own if you already have a sign-on tunnel. Miners use the stratum address, not the https page. The pool port accepts connections as soon as the node process is up. Work is sent when the node can serve a template, which on a new mainnet node waits through the download.
+On Windows that button is in Thimble - Settings: Open free tunnel. The host starts `tools\cloudflared.exe` itself and reads the https address from `tools\tunnel.log`. It also publishes the plain stratum port as `stratum+tcp://bore.pub:PORT`. The mining relay is inside the host, so it does not need a separate bore.exe or the Visual C++ runtime. Publish mining port does the pool port on its own if you already have a sign-on tunnel. Miners use the stratum address, not the https page. The pool port accepts connections as soon as the node process is up. Work is sent when the node can serve a template, which on a new mainnet node waits through the download. If the line still says cloudflared would not start, replace `windows/ThimbleServer.exe` with the copy from this repo and open the tunnel again.
 
 Or `ngrok http 8080`. Give them the URL. They sign up in a browser. A miner points `--host` at that name and `--port` at the pool port you also exposed.
 

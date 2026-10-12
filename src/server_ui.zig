@@ -40,6 +40,152 @@ extern "user32" fn AppendMenuA(menu: HMENU, flags: u32, id: usize, text: [*:0]co
 extern "user32" fn SetMenu(hwnd: HWND, menu: HMENU) callconv(.winapi) i32;
 extern "user32" fn SetTimer(hwnd: HWND, id: usize, ms: u32, proc: ?*anyopaque) callconv(.winapi) usize;
 extern "kernel32" fn GetModuleHandleA(name: ?[*:0]const u8) callconv(.winapi) HINSTANCE;
+extern "kernel32" fn GetModuleFileNameA(mod: ?HINSTANCE, buf: [*]u8, n: u32) callconv(.winapi) u32;
+extern "kernel32" fn SetCurrentDirectoryA(path: [*:0]const u8) callconv(.winapi) i32;
+extern "kernel32" fn GetFileAttributesExA(name: [*:0]const u8, level: u32, info: *FileAttr) callconv(.winapi) i32;
+extern "kernel32" fn DeleteFileA(name: [*:0]const u8) callconv(.winapi) i32;
+extern "kernel32" fn CreateFileA(name: [*:0]const u8, access: u32, share: u32, sa: ?*SecAttr, disp: u32, flags: u32, template: ?*anyopaque) callconv(.winapi) ?*anyopaque;
+extern "kernel32" fn CreateProcessA(app: ?[*:0]const u8, cmd: [*:0]u8, proc_attr: ?*anyopaque, thread_attr: ?*anyopaque, inherit: i32, flags: u32, env: ?*anyopaque, cwd: ?[*:0]const u8, startup: *StartupA, info: *ProcInfo) callconv(.winapi) i32;
+extern "kernel32" fn CloseHandle(handle: ?*anyopaque) callconv(.winapi) i32;
+extern "kernel32" fn TerminateProcess(handle: ?*anyopaque, code: u32) callconv(.winapi) i32;
+extern "kernel32" fn GetLastError() callconv(.winapi) u32;
+
+const FileAttr = extern struct {
+    attrs: u32,
+    create_lo: u32,
+    create_hi: u32,
+    access_lo: u32,
+    access_hi: u32,
+    write_lo: u32,
+    write_hi: u32,
+    size_high: u32,
+    size_low: u32,
+};
+const SecAttr = extern struct { nLength: u32, sd: ?*anyopaque = null, inherit: i32 };
+const StartupA = extern struct {
+    cb: u32,
+    reserved: ?[*:0]u8 = null,
+    desktop: ?[*:0]u8 = null,
+    title: ?[*:0]u8 = null,
+    x: u32 = 0,
+    y: u32 = 0,
+    x_size: u32 = 0,
+    y_size: u32 = 0,
+    x_chars: u32 = 0,
+    y_chars: u32 = 0,
+    fill: u32 = 0,
+    flags: u32 = 0,
+    show: u16 = 0,
+    reserved2_len: u16 = 0,
+    reserved2: ?*u8 = null,
+    stdin: ?*anyopaque = null,
+    stdout: ?*anyopaque = null,
+    stderr: ?*anyopaque = null,
+};
+const ProcInfo = extern struct { process: ?*anyopaque, thread: ?*anyopaque, pid: u32, tid: u32 };
+
+var cf_process: ?*anyopaque = null;
+var cf_winerr: u32 = 0;
+
+fn exeDir(out: []u8) usize {
+    var buf: [520]u8 = @splat(0);
+    const n = GetModuleFileNameA(null, &buf, 519);
+    if (n == 0 or n >= 519) return 0;
+    var end: usize = n;
+    while (end > 0 and buf[end - 1] != '\\' and buf[end - 1] != '/') end -= 1;
+    if (end < 2) return 0;
+    const len = end - 1;
+    if (len >= out.len) return 0;
+    @memcpy(out[0..len], buf[0..len]);
+    return len;
+}
+
+pub fn sitBesideExe() void {
+    var dir: [520]u8 = @splat(0);
+    const n = exeDir(&dir);
+    if (n == 0) return;
+    dir[n] = 0;
+    _ = SetCurrentDirectoryA(dir[0..n :0]);
+}
+
+fn fileSize(path: [*:0]const u8) u64 {
+    var info: FileAttr = std.mem.zeroes(FileAttr);
+    if (GetFileAttributesExA(path, 0, &info) == 0) return 0;
+    return (@as(u64, info.size_high) << 32) | info.size_low;
+}
+
+fn checkedExe(path_z: [*:0]const u8, path: []const u8) bool {
+    const size = fileSize(path_z);
+    if (size < 8_000_000 or size > 80_000_000) return false;
+    const file = compat.fs.cwd().openFile(path, .{}) catch return false;
+    defer file.close();
+    var mag: [2]u8 = undefined;
+    const n = file.read(&mag) catch return false;
+    return n == 2 and mag[0] == 'M' and mag[1] == 'Z';
+}
+
+fn openNul() ?*anyopaque {
+    var sa = SecAttr{ .nLength = @sizeOf(SecAttr), .inherit = 1 };
+    const handle = CreateFileA("NUL", 0xC0000000, 3, &sa, 3, 0x80, null);
+    if (@intFromPtr(handle) == std.math.maxInt(usize)) return null;
+    return handle;
+}
+
+fn startCloudflared() bool {
+    var dir: [520]u8 = @splat(0);
+    const dlen = exeDir(&dir);
+    if (dlen == 0 or dlen + 28 >= dir.len) return false;
+    var cf: [600]u8 = @splat(0);
+    var logp: [600]u8 = @splat(0);
+    const prefix = dir[0..dlen];
+    if (prefix.len + 1 + "tools\\cloudflared.exe".len >= cf.len) return false;
+    @memcpy(cf[0..prefix.len], prefix);
+    cf[prefix.len] = '\\';
+    const cf_rel = "tools\\cloudflared.exe";
+    @memcpy(cf[prefix.len + 1 ..][0..cf_rel.len], cf_rel);
+    const cfn = prefix.len + 1 + cf_rel.len;
+    cf[cfn] = 0;
+    const log_rel = "tools\\tunnel.log";
+    @memcpy(logp[0..prefix.len], prefix);
+    logp[prefix.len] = '\\';
+    @memcpy(logp[prefix.len + 1 ..][0..log_rel.len], log_rel);
+    const logn = prefix.len + 1 + log_rel.len;
+    logp[logn] = 0;
+    {
+        var blank = compat.fs.cwd().createFile("tools/tunnel.log", .{}) catch return false;
+        blank.close();
+    }
+    var cmd: [1500]u8 = @splat(0);
+    const wrote = std.fmt.bufPrint(cmd[0 .. cmd.len - 1], "\"{s}\" tunnel --url http://127.0.0.1:8080 --no-autoupdate --protocol http2 --logfile \"{s}\"", .{ cf[0..cfn], logp[0..logn] }) catch return false;
+    cmd[wrote.len] = 0;
+    const nul = openNul() orelse return false;
+    defer _ = CloseHandle(nul);
+    var si = std.mem.zeroes(StartupA);
+    si.cb = @sizeOf(StartupA);
+    si.flags = 0x00000100;
+    si.stdin = nul;
+    si.stdout = nul;
+    si.stderr = nul;
+    var pi = std.mem.zeroes(ProcInfo);
+    dir[dlen] = 0;
+    const ok = CreateProcessA(cf[0..cfn :0], cmd[0..wrote.len :0], null, null, 1, 0x08000000, null, dir[0..dlen :0], &si, &pi);
+    if (ok == 0) {
+        cf_winerr = GetLastError();
+        return false;
+    }
+    _ = CloseHandle(pi.thread);
+    if (cf_process) |old| _ = CloseHandle(old);
+    cf_process = pi.process;
+    return true;
+}
+
+fn stopCloudflared() void {
+    if (cf_process) |handle| {
+        _ = TerminateProcess(handle, 1);
+        _ = CloseHandle(handle);
+        cf_process = null;
+    }
+}
 extern "comctl32" fn InitCommonControls() callconv(.winapi) void;
 extern "gdi32" fn CreateSolidBrush(color: u32) callconv(.winapi) HBRUSH;
 const PBM_SETPOS: u32 = 0x0402;
@@ -592,36 +738,22 @@ fn connectAfter(port: u16, algo: []const u8, name: []const u8, dest: []const u8)
     chain.launchBuilt(port, algo, name, dest);
 }
 
-var cf_exe: [260]u8 = @splat(0);
-var cf_args = [_][]const u8{
-    "",
-    "tunnel",
-    "--url",
-    "http://127.0.0.1:8080",
-    "--no-autoupdate",
-    "--protocol",
-    "http2",
-    "--logfile",
-    "tools/tunnel.log",
-};
-
 fn realExe(path: []const u8) bool {
-    if (!toolAt(path)) return false;
-    const file = compat.fs.cwd().openFile(path, .{}) catch return false;
-    defer file.close();
-    var mag: [2]u8 = undefined;
-    const n = file.read(&mag) catch return false;
-    return n == 2 and mag[0] == 'M' and mag[1] == 'Z';
-}
-
-fn cloudflaredPath() []const u8 {
-    if (realExe("tools/cloudflared.exe")) return "tools\\cloudflared.exe";
-    return "cloudflared";
+    var z: [520]u8 = @splat(0);
+    if (path.len + 1 > z.len) return false;
+    @memcpy(z[0..path.len], path);
+    z[path.len] = 0;
+    return checkedExe(z[0..path.len :0], path);
 }
 
 fn ensureCloudflared() bool {
     if (realExe("tools/cloudflared.exe")) return true;
-    if (which("cloudflared") and !toolAt("tools/cloudflared.exe")) return true;
+    if (toolAt("tools/cloudflared.exe")) {
+        var gone: [32]u8 = @splat(0);
+        const rel = "tools/cloudflared.exe";
+        @memcpy(gone[0..rel.len], rel);
+        _ = DeleteFileA(gone[0..rel.len :0]);
+    }
     setText(tunnel_line, "Downloading cloudflared. About 40 MB, no account.");
     compat.fs.cwd().makePath("tools") catch return false;
     const url = "https://github.com/cloudflare/cloudflared/releases/download/2026.10.0/cloudflared-windows-amd64.exe";
@@ -669,23 +801,13 @@ fn tunnelWorker() void {
     if (!ensureCloudflared()) {
         setText(tunnel_line, "Could not download cloudflared. It has to be the real program, not an error page. Opening the mining port anyway.");
     } else {
-        {
-            var blank = compat.fs.cwd().createFile("tools/tunnel.log", .{}) catch return;
-            blank.close();
-        }
-        const cf = cloudflaredPath();
-        const n = @min(cf.len, cf_exe.len);
-        @memcpy(cf_exe[0..n], cf[0..n]);
-        cf_args[0] = cf_exe[0..n];
         setText(tunnel_line, "Opening the sign-on page and the mining port.");
-        tunnel_child = compat.Child.init(&cf_args, std.heap.page_allocator);
-        tunnel_child.stdout_behavior = .Ignore;
-        tunnel_child.stderr_behavior = .Ignore;
-        tunnel_child.create_no_window = true;
-        if (tunnel_child.spawn()) |_| {
+        if (startCloudflared()) {
             tunnel_live = true;
-        } else |_| {
-            setText(tunnel_line, "cloudflared would not start. tools\\cloudflared.exe has to be the real program. Opening the mining port anyway.");
+        } else {
+            var msg: [180]u8 = undefined;
+            const text = std.fmt.bufPrint(&msg, "cloudflared would not start (Windows error {d}). Opening the mining port anyway.", .{cf_winerr}) catch "cloudflared would not start. Opening the mining port anyway.";
+            setText(tunnel_line, text);
         }
     }
     startMineRelay();
@@ -723,7 +845,7 @@ fn closeTunnel() void {
         return;
     }
     tunnel_live = false;
-    tunnel_child.kill();
+    stopCloudflared();
     var stop_cf = compat.Child.init(&.{ "taskkill", "/F", "/IM", "cloudflared.exe" }, std.heap.page_allocator);
     stop_cf.stdout_behavior = .Ignore;
     stop_cf.stderr_behavior = .Ignore;

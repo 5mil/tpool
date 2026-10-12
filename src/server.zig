@@ -660,6 +660,7 @@ fn settingsMenu(in: compat.File, buf: []u8) void {
 
 pub fn main(init: std.process.Init) !void {
     compat.bind(init);
+    if (comptime @import("builtin").os.tag == .windows) @import("server_ui.zig").sitBesideExe();
     var args = try std.process.Args.Iterator.initAllocator(init.minimal.args, init.gpa);
     defer args.deinit();
     _ = args.skip();
